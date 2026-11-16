@@ -8,6 +8,7 @@
     "title",
     "description",
     "accountable_owner",
+    "coordination_user",
     "status",
     "next_action",
     "next_action_date",
@@ -39,11 +40,17 @@
     },
     {
       "fieldname": "accountable_owner",
-      "label": "Accountable Owner",
+      "label": "Issue Owner",
       "fieldtype": "Link",
       "options": "User",
       "reqd": 1,
       "in_list_view": 1
+    },
+    {
+      "fieldname": "coordination_user",
+      "label": "Coordinating with",
+      "fieldtype": "Link",
+      "options": "User"
     },
     {
       "fieldname": "status",

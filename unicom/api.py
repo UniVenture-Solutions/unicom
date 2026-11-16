@@ -43,6 +43,11 @@ def _validate(doc):
     if not (doc.title or '').strip():
         frappe.throw(_('Title is required'))
     _users([doc.accountable_owner])
+    coordination_user = getattr(doc, 'coordination_user', None)
+    if coordination_user:
+        _users([coordination_user])
+        if frappe.db.get_value('User', coordination_user, 'user_type') != 'System User':
+            frappe.throw(_('Coordinating user must be an enabled system user'))
     if doc.status not in STATUSES:
         frappe.throw(_('Invalid status'))
     if doc.status == 'Resolved':
@@ -65,7 +70,7 @@ def _set_users(doc, reason, users):
 
 def _snapshot(doc):
     return {'title': doc.title, 'description': doc.description, 'accountable_owner': doc.accountable_owner,
-            'status': doc.status, 'next_action': doc.next_action, 'next_action_date': str(doc.next_action_date or ''),
+            'coordination_user': getattr(doc, 'coordination_user', None) or None, 'status': doc.status, 'next_action': doc.next_action, 'next_action_date': str(doc.next_action_date or ''),
             'resolution_note': doc.resolution_note,
             'participants': sorted(r.user for r in doc.access if r.reason == 'Participant'),
             'follow_up_assignees': sorted(r.user for r in doc.access if r.reason == 'Follow-up')}
@@ -99,7 +104,7 @@ def _output(doc):
 @frappe.whitelist()
 def users(query=''):
     _user()
-    return frappe.get_all('User', filters={'enabled': 1, 'name': ['not in', ['Guest', 'Administrator']], 'full_name': ['like', '%' + query + '%']}, fields=['name', 'full_name'], order_by='full_name', limit_page_length=10000)
+    return frappe.get_all('User', filters={'enabled': 1, 'name': ['not in', ['Guest', 'Administrator']], 'full_name': ['like', '%' + query + '%']}, fields=['name', 'full_name', 'user_type'], order_by='full_name', limit_page_length=10000)
 
 
 @frappe.whitelist()
@@ -116,12 +121,12 @@ def list_issues(view='all', status=None, search=None, start=0, page_length=20):
     if search:
         filters['title'] = ['like', '%' + search + '%']
     # frappe.get_list applies both role permissions and issue_query.
-    rows = frappe.get_list('UniCom Issue', filters=filters, fields=['name', 'issue_id', 'title', 'status', 'accountable_owner', 'owner', 'next_action', 'next_action_date', 'modified'], order_by='modified desc', limit_start=max(0, int(start)), limit_page_length=min(100, max(1, int(page_length)))) if view != 'mine' else None
+    rows = frappe.get_list('UniCom Issue', filters=filters, fields=['name', 'issue_id', 'title', 'status', 'accountable_owner', 'coordination_user', 'owner', 'next_action', 'next_action_date', 'modified'], order_by='modified desc', limit_start=max(0, int(start)), limit_page_length=min(100, max(1, int(page_length)))) if view != 'mine' else None
     if view == 'mine':
         # Query filter must be combined with access permissions before pagination.
         u = frappe.db.escape(user)
         filters['name'] = ['in', [r.name for r in frappe.db.sql(f'''SELECT DISTINCT i.name FROM `tabUniCom Issue` i LEFT JOIN `tabUniCom Issue Access` a ON a.parent=i.name AND a.parenttype='UniCom Issue' AND a.parentfield='access' WHERE i.owner={u} OR i.accountable_owner={u} OR (a.user={u} AND a.reason IN ('Participant','Follow-up'))''', as_dict=True)] or ['']]
-        rows = frappe.get_list('UniCom Issue', filters=filters, fields=['name','issue_id','title','status','accountable_owner','owner','next_action','next_action_date','modified'], order_by='modified desc', limit_start=max(0,int(start)), limit_page_length=min(100,max(1,int(page_length))))
+        rows = frappe.get_list('UniCom Issue', filters=filters, fields=['name','issue_id','title','status','accountable_owner','coordination_user','owner','next_action','next_action_date','modified'], order_by='modified desc', limit_start=max(0,int(start)), limit_page_length=min(100,max(1,int(page_length))))
     for row in rows:
         row['overdue'] = bool(row.status != 'Resolved' and row.next_action_date and getdate(row.next_action_date) < getdate(today()))
     return rows
@@ -133,10 +138,10 @@ def get_issue(name):
 
 
 @frappe.whitelist(methods=['POST'])
-def create_issue(title, accountable_owner, next_action, next_action_date, description='', participants=None, follow_up_assignees=None):
+def create_issue(title, accountable_owner, next_action, next_action_date, description='', participants=None, follow_up_assignees=None, coordination_user=None):
     _user()
     doc = frappe.new_doc('UniCom Issue')
-    doc.update({'title': title, 'description': frappe.utils.sanitize_html(description or '', always_sanitize=True), 'accountable_owner': accountable_owner, 'status': 'Open', 'next_action': next_action, 'next_action_date': next_action_date})
+    doc.update({'title': title, 'description': frappe.utils.sanitize_html(description or '', always_sanitize=True), 'accountable_owner': accountable_owner, 'coordination_user': None if coordination_user is None or coordination_user == '' else coordination_user, 'status': 'Open', 'next_action': next_action, 'next_action_date': next_action_date})
     _set_users(doc, 'Participant', participants)
     _set_users(doc, 'Follow-up', follow_up_assignees)
     _validate(doc)
@@ -151,11 +156,12 @@ def update_issue(name, values):
     doc = _doc(name, lock=True)
     before = _snapshot(doc)
     values = _json(values, {})
-    if not isinstance(values, dict) or set(values) - {'title','description','accountable_owner','status','next_action','next_action_date','resolution_note','participants','follow_up_assignees'}:
+    if not isinstance(values, dict) or set(values) - {'title','description','accountable_owner','coordination_user','status','next_action','next_action_date','resolution_note','participants','follow_up_assignees'}:
         frappe.throw(_('Invalid fields'))
     for key, val in values.items():
         if key == 'participants': _set_users(doc, 'Participant', val)
         elif key == 'follow_up_assignees': _set_users(doc, 'Follow-up', val)
+        elif key == 'coordination_user': doc.coordination_user = None if val is None or val == '' else val
         elif key == 'description': doc.description = frappe.utils.sanitize_html(val or '', always_sanitize=True)
         else: doc.set(key, val)
     _validate(doc)
