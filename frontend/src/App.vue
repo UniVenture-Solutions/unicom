@@ -1,9 +1,10 @@
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
-import { Button, FormControl, Dialog, TextEditor, Badge, ListView, ListFooter, FileUploader, ErrorMessage, Breadcrumbs, Dropdown } from 'frappe-ui'
+import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
+import { Button, FormControl, Dialog, TextEditor, Badge, Avatar, FeatherIcon, ListView, ListFooter, FileUploader, ErrorMessage, Breadcrumbs, Dropdown } from 'frappe-ui'
 
 const view=ref('mine'), rows=ref([]), issue=ref(null), people=ref([]), error=ref(''), busy=ref(false), page=ref(0), search=ref(''), filter=ref(''), showNew=ref(false), showLog=ref(false), showEdit=ref(false)
 const commentBody=ref(''), commentError=ref(''), commentEditorKey=ref(0)
+const replyEditor=ref(null)
 const replyRoot=ref(null), replyBody=ref(''), replyError=ref(''), replyEditorKey=ref(0), expandedThreads=ref(new Set())
 watch(() => issue.value?.name, () => { commentBody.value=''; commentError.value=''; commentEditorKey.value++; replyRoot.value=null; replyBody.value=''; replyError.value=''; replyEditorKey.value++; expandedThreads.value=new Set() }, {flush:'sync'})
 const blank=()=>({title:'',description:'',accountable_owner:'',next_action:'',next_action_date:'',participants:[],follow_up_assignees:[]})
@@ -46,7 +47,8 @@ async function saveComment(){
   finally{busy.value=false}
 }
 function toggleThread(root){const next=new Set(expandedThreads.value); if(next.has(root)) next.delete(root); else next.add(root); expandedThreads.value=next}
-function startReply(root){if(replyRoot.value!==root){replyRoot.value=root;replyBody.value='';replyError.value='';replyEditorKey.value++} const next=new Set(expandedThreads.value);next.add(root);expandedThreads.value=next}
+function setReplyEditor(editor){replyEditor.value=editor}
+function startReply(root){if(replyRoot.value!==root){replyRoot.value=root;replyBody.value='';replyError.value='';replyEditorKey.value++} const next=new Set(expandedThreads.value);next.add(root);expandedThreads.value=next;nextTick(()=>replyEditor.value?.editor?.commands.focus())}
 function cancelReply(){replyRoot.value=null;replyBody.value='';replyError.value='';replyEditorKey.value++}
 async function saveReply(root){
   if(busy.value || replyRoot.value!==root) return
@@ -57,7 +59,20 @@ async function saveReply(root){
   finally{busy.value=false}
 }
 async function uploadDone(){ await open(issue.value.name,false) }
-function changes(event){try{return Object.entries(JSON.parse(event.changes||'{}')).map(([k,v])=>`${k.replaceAll('_',' ')}: ${v.from || '—'} → ${v.to || '—'}`)}catch{return []}}
+function authorName(user){return people.value.find(person=>person.name===user)?.full_name || user || 'Unknown user'}
+// Frappe timestamps are site-local wall times; format the components without converting zones.
+function formatSiteTime(value){
+  if(!value) return '—'
+  const match=String(value).match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/)
+  if(!match) return String(value)
+  const date=new Date(Date.UTC(+match[1],+match[2]-1,+match[3],+(match[4]||0),+(match[5]||0),+(match[6]||0)))
+  if(Number.isNaN(date.getTime())) return String(value)
+  return new Intl.DateTimeFormat(undefined,{timeZone:'UTC',year:'numeric',month:'short',day:'numeric',...(match[4] ? {hour:'numeric',minute:'2-digit'} : {})}).format(date)
+}
+function fieldLabel(key){return ({accountable_owner:'Accountable owner',next_action:'Next action',next_action_date:'Next action date',resolution_note:'Resolution note',follow_up_assignees:'Follow-up assignees'})[key] || key.replaceAll('_',' ').replace(/^./,c=>c.toUpperCase())}
+function changeValue(value,key){if(value===null || value===undefined || value==='') return '—'; if(Array.isArray(value)) return value.length ? value.join(', ') : '—'; if(typeof value==='object') return JSON.stringify(value); if(key==='next_action_date') return formatSiteTime(value); return String(value)}
+function changes(event){try{const data=JSON.parse(event.changes||'{}');return Object.entries(data).map(([key,value])=>({label:fieldLabel(key),text:`${changeValue(value?.from,key)} → ${changeValue(value?.to,key)}`,raw:JSON.stringify(value)}))}catch{return event.changes ? [{label:'Changes',text:event.changes,raw:event.changes}] : []}}
+
 onMounted(async()=>{await run(async()=>{people.value=await api('users'); const name=decodeURIComponent(location.pathname.replace(/^\/unicom\/?/,'')); if(name) await open(name,false); else await load()});window.onpopstate=()=>{const name=decodeURIComponent(location.pathname.replace(/^\/unicom\/?/,''));if(name)open(name,false);else{issue.value=null;load()}}})
 </script>
 <template>
@@ -81,17 +96,38 @@ onMounted(async()=>{await run(async()=>{people.value=await api('users'); const n
     <template v-else>
       <div class="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-[auto_1fr]">
         <div class="order-1 w-full min-w-0 max-w-4xl mx-auto p-6 flex flex-wrap justify-between gap-4 items-start"><div class="min-w-0 flex-1 basis-64"><Button variant="ghost" @click="goList(view)">← Back to issues</Button><h1 class="text-2xl font-semibold mt-3 break-words">{{issue.title}}</h1><p class="text-sm text-gray-500 mt-2">{{issue.name}} · Created by {{issue.owner}}</p></div><div class="flex flex-wrap shrink-0 gap-2 whitespace-nowrap"><Button @click="editIssue">Edit / resolve</Button><Button variant="solid" :disabled="issue.status==='Resolved'" @click="logIssue">Log communication</Button></div></div>
-        <section class="order-3 lg:order-2 w-full min-w-0 max-w-4xl mx-auto px-6 pb-6 space-y-6 break-words"><div><h2 class="font-semibold mb-2">Description</h2><div class="text-sm text-gray-700" v-html="issue.description || '—'"></div></div><div><h2 class="font-semibold mb-3">Timeline</h2><div class="mb-6 space-y-3"><label class="text-sm font-medium">Add a comment</label><TextEditor :key="commentEditorKey" :content="commentBody" :mentions="mentionOptions" placeholder="Write a comment; type @ to mention someone" @change="value=>commentBody=value"/><ErrorMessage :message="safeCommentError"/><Button variant="solid" :loading="busy" :disabled="busy" @click="saveComment">Post comment</Button></div><div v-for="thread in timelineThreads" :key="thread.event.name" class="border-l-2 pl-4 pb-5">
-          <div class="text-sm font-medium">{{thread.event.kind}} <span v-if="thread.event.channel">· {{thread.event.channel}}</span></div>
-          <div class="text-xs text-gray-500 mt-1">{{thread.event.actor}} · recorded {{thread.event.recorded_at}} <span v-if="thread.event.happened_at"> · happened {{thread.event.happened_at}}</span></div>
-          <p v-if="thread.event.contact" class="text-sm mt-1">Contact: {{thread.event.contact}}</p><div v-if="thread.event.body" class="text-sm mt-2" v-html="thread.event.body"></div>
-          <p v-for="change in changes(thread.event)" :key="change" class="text-xs text-gray-600 mt-1">{{change}}</p>
-          <div v-if="['Comment','Communication'].includes(thread.event.kind)" class="mt-2">
-            <div class="flex gap-2"><Button variant="ghost" :disabled="busy" @click="startReply(thread.event.name)">Reply</Button><Button v-if="thread.replies.length" variant="ghost" @click="toggleThread(thread.event.name)">{{expandedThreads.has(thread.event.name)?'Hide':'Show'}} {{thread.replies.length}} {{thread.replies.length===1?'reply':'replies'}}</Button><span v-else class="self-center text-xs text-gray-500">0 replies</span></div>
-            <div v-if="expandedThreads.has(thread.event.name)" class="ml-3 mt-3 space-y-4 border-l pl-4"><div v-for="reply in thread.replies" :key="reply.name"><div class="text-xs text-gray-500">{{reply.actor}} · recorded {{reply.recorded_at}}</div><div class="text-sm mt-1" v-html="reply.body"></div></div></div>
-            <div v-if="replyRoot===thread.event.name" class="mt-3 space-y-2"><label class="text-sm font-medium">Reply</label><TextEditor :key="replyEditorKey" :content="replyBody" :mentions="mentionOptions" placeholder="Write a reply; type @ to mention someone" @change="value=>replyBody=value"/><ErrorMessage :message="safeReplyError"/><div class="flex gap-2"><Button variant="solid" :loading="busy" :disabled="busy" @click="saveReply(thread.event.name)">Post reply</Button><Button :disabled="busy" @click="cancelReply">Cancel</Button></div></div>
+        <section class="order-3 lg:order-2 w-full min-w-0 max-w-4xl mx-auto px-6 pb-6 space-y-6 break-words"><div><h2 class="font-semibold mb-2">Description</h2><div class="text-sm text-gray-700" v-html="issue.description || '—'"></div></div><div>
+          <h2 class="font-semibold mb-4">Timeline</h2>
+          <div class="mb-8 rounded-lg border border-gray-200 p-3 space-y-2">
+            <TextEditor :key="commentEditorKey" class="timeline-editor" :content="commentBody" :mentions="mentionOptions" placeholder="Write a comment; type @ to mention someone" @change="value=>commentBody=value"/>
+            <ErrorMessage :message="safeCommentError"/><div class="flex justify-end"><Button variant="solid" :loading="busy" :disabled="busy" @click="saveComment">Post comment</Button></div>
           </div>
-        </div></div></section>
+          <div class="space-y-5">
+            <div v-for="thread in timelineThreads" :key="thread.event.name">
+              <article v-if="['Comment','Communication'].includes(thread.event.kind)" class="flex gap-3">
+                <Avatar size="xl" :label="authorName(thread.event.actor)"/>
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-x-2 gap-y-1"><span class="text-sm font-semibold">{{authorName(thread.event.actor)}}</span><Badge theme="gray">{{thread.event.channel || thread.event.kind}}</Badge><span class="text-xs text-gray-500" :title="'Recorded: '+thread.event.recorded_at">{{formatSiteTime(thread.event.recorded_at)}}</span></div>
+                  <div v-if="thread.event.happened_at" class="mt-1 text-xs text-gray-500" :title="'Happened: '+thread.event.happened_at">Happened {{formatSiteTime(thread.event.happened_at)}}</div>
+                  <p v-if="thread.event.contact" class="text-xs text-gray-500 mt-1">Contact: {{thread.event.contact}}</p>
+                  <div v-if="thread.event.body" class="text-sm text-gray-800 mt-2" v-html="thread.event.body"></div>
+                  <p v-for="change in changes(thread.event)" :key="change.label" class="text-xs text-gray-600 mt-1" :title="change.raw">{{change.label}}: {{change.text}}</p>
+                  <div class="flex items-center gap-2 mt-2">
+                    <Button variant="ghost" size="sm" :disabled="busy || (replyRoot && replyRoot!==thread.event.name)" :aria-label="'Reply to '+authorName(thread.event.actor)" @click="startReply(thread.event.name)">Reply</Button>
+                    <Button v-if="thread.replies.length" variant="ghost" size="sm" :disabled="replyRoot===thread.event.name" :aria-expanded="expandedThreads.has(thread.event.name)" :aria-controls="'thread-'+thread.event.name" :aria-label="(expandedThreads.has(thread.event.name)?'Hide ':'Show ')+thread.replies.length+' replies to '+authorName(thread.event.actor)" @click="toggleThread(thread.event.name)">{{expandedThreads.has(thread.event.name)?'Hide':'Show'}} {{thread.replies.length}} {{thread.replies.length===1?'reply':'replies'}}</Button>
+                  </div>
+                  <div v-if="expandedThreads.has(thread.event.name)" :id="'thread-'+thread.event.name" class="mt-3 border-l-2 border-gray-200 bg-gray-50 rounded-r-lg px-4 py-3 space-y-4">
+                    <div v-for="reply in thread.replies" :key="reply.name" class="flex gap-2"><Avatar size="md" :label="authorName(reply.actor)"/><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-x-2"><span class="text-sm font-medium">{{authorName(reply.actor)}}</span><span class="text-xs text-gray-500" :title="'Recorded: '+reply.recorded_at">{{formatSiteTime(reply.recorded_at)}}</span></div><div class="text-sm text-gray-800 mt-1" v-html="reply.body"></div></div></div>
+                    <div v-if="replyRoot===thread.event.name" class="space-y-2"><div class="text-xs font-medium text-gray-600">Reply to {{authorName(thread.event.actor)}}</div><TextEditor :ref="setReplyEditor" :key="replyEditorKey" class="timeline-editor" :content="replyBody" :mentions="mentionOptions" placeholder="Write a reply; type @ to mention someone" @change="value=>replyBody=value"/><ErrorMessage :message="safeReplyError"/><div class="flex justify-end gap-2"><Button :disabled="busy" @click="cancelReply">Cancel</Button><Button variant="solid" :loading="busy" :disabled="busy" @click="saveReply(thread.event.name)">Post reply</Button></div></div>
+                  </div>
+                </div>
+              </article>
+              <div v-else class="flex gap-3 rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                <FeatherIcon name="activity" class="h-4 w-4 mt-0.5"/><div class="min-w-0"><div><span class="font-medium text-gray-700">{{authorName(thread.event.actor)}}</span> · {{thread.event.kind}} · <span :title="'Recorded: '+thread.event.recorded_at">{{formatSiteTime(thread.event.recorded_at)}}</span></div><div v-if="thread.event.happened_at" :title="'Happened: '+thread.event.happened_at">Happened {{formatSiteTime(thread.event.happened_at)}}</div><div v-if="thread.event.channel">{{thread.event.channel}}</div><div v-if="thread.event.contact">Contact: {{thread.event.contact}}</div><div v-if="thread.event.body" v-html="thread.event.body"></div><p v-for="change in changes(thread.event)" :key="change.label" class="mt-1" :title="change.raw">{{change.label}}: {{change.text}}</p></div>
+              </div>
+            </div>
+          </div>
+        </div></section>
         <aside class="order-2 lg:order-3 min-w-0 space-y-4 border-t lg:border-t-0 lg:border-l p-6 text-sm break-words lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-0 lg:self-start lg:min-h-[calc(100vh-4rem)] lg:max-h-screen lg:overflow-y-auto"><div><div class="text-gray-500">Status</div><div>{{issue.status}} <Badge v-if="issue.overdue" theme="red">Overdue</Badge></div></div><div><div class="text-gray-500">Accountable owner</div>{{issue.accountable_owner}}</div><div><div class="text-gray-500">Next action</div>{{issue.next_action||'—'}} · {{issue.next_action_date||'—'}}</div><div v-if="issue.resolution_note"><div class="text-gray-500">Resolution</div>{{issue.resolution_note}}</div><div><div class="text-gray-500">Participants</div>{{issue.access.filter(x=>x.reason==='Participant').map(x=>x.user).join(', ')||'—'}}</div><div><div class="text-gray-500">Follow-up assignees</div>{{issue.access.filter(x=>x.reason==='Follow-up').map(x=>x.user).join(', ')||'—'}}</div><div><div class="text-gray-500 mb-2">Attachments</div><a v-for="f in issue.attachments" :key="f.name" :href="f.file_url" target="_blank" class="block text-blue-600 underline">{{f.file_name}}</a><FileUploader :upload-args="{upload_endpoint:'/api/method/unicom.api.upload_attachment',docname:issue.name,private:true}" :validate-file="f=>f.size>10*1024*1024?'Maximum attachment size is 10 MB':null" @success="uploadDone"><template #default="{openFileSelector,uploading,error:uploadError}"><Button class="mt-2" :loading="uploading" @click="openFileSelector">Add private file</Button><ErrorMessage :message="uploadError"/></template></FileUploader></div></aside>
       </div>
     </template>

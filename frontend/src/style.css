@@ -3,3 +3,5 @@
 @tailwind utilities;
 body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #171717; background: #fff; }
 .ProseMirror { min-height: 100px; padding: .75rem; border: 1px solid #e5e7eb; border-radius: .375rem; outline: none; }
+
+.timeline-editor .ProseMirror { min-height: 3rem; }
