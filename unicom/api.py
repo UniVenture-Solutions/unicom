@@ -106,13 +106,19 @@ def _output(doc):
     result = doc.as_dict()
     result['overdue'] = bool(doc.status != 'Resolved' and doc.next_action_date and getdate(doc.next_action_date) < getdate(today()))
     result['attachments'] = [{'name': row.name, 'file_name': row.file_name, 'file_url': '/api/method/unicom.api.download_attachment?' + urlencode({'name': doc.name, 'attachment': row.name}), 'creation': row.uploaded_at} for row in doc.attachments]
+    profile_users = {doc.owner, doc.accountable_owner, getattr(doc, 'coordination_user', None)}
+    profile_users.update(event.actor for event in doc.timeline if event.actor)
+    profile_users.discard(None)
+    profile_users.discard('')
+    # This document was already checked for access. Only its referenced people are exposed.
+    result['user_profiles'] = frappe.get_all('User', filters={'name': ['in', sorted(profile_users)]}, fields=['name', 'full_name', 'user_image'], limit_page_length=0) if profile_users else []
     return result
 
 
 @frappe.whitelist()
 def users(query=''):
     _user()
-    return frappe.get_all('User', filters={'enabled': 1, 'name': ['not in', ['Guest', 'Administrator']], 'full_name': ['like', '%' + query + '%']}, fields=['name', 'full_name', 'user_type'], order_by='full_name', limit_page_length=10000)
+    return frappe.get_all('User', filters={'enabled': 1, 'name': ['not in', ['Guest', 'Administrator']], 'full_name': ['like', '%' + query + '%']}, fields=['name', 'full_name', 'user_type', 'user_image'], order_by='full_name', limit_page_length=10000)
 
 
 @frappe.whitelist()
