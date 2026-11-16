@@ -1,30 +1,27 @@
-# UniCom CRM fidelity QA
+# Thread reply UI QA
 
-Source visual truth:
-- Sidebar: `/var/folders/nq/67sqxn453yq20sxjks5fc3rm0000gn/T/codex-clipboard-d6859d65-6373-4fb5-9247-96edb18c1b55.png` (562×864).
-- Breadcrumbs: `/var/folders/nq/67sqxn453yq20sxjks5fc3rm0000gn/T/codex-clipboard-a8d986bc-d5f8-4258-a229-56d28b641d85.png` (2144×68).
-- Right pane: `/var/folders/nq/67sqxn453yq20sxjks5fc3rm0000gn/T/codex-clipboard-c4e1e71c-03ad-4d57-8963-84268601d9cf.png` (790×1732).
+Source: `/var/folders/nq/67sqxn453yq20sxjks5fc3rm0000gn/T/codex-clipboard-1f66c0a5-b646-4fbe-a3dc-1f1ab278ee09.png` (512×116). Target is the compact participant-avatar/reply-count/latest-activity pattern, adapted to the established light Frappe styling. Unsupported Following behavior and the reference dark theme are intentionally omitted. Actual participant names, counts and dates come from the issue.
 
-Implementation: development site issue `5db7ktud6h`, public ID `ISU-0001`, authenticated Administrator, light theme. Full-context capture `/tmp/unicom-crm-exact/detail-final.png`, list capture `list-after.png`, focused combined comparison `focused-comparison-final.png`. The three provided references are focused regions, with different CRM content. They were viewed together with corresponding implementation regions; the complete implementation was also inspected for context. Close-up references were normalized by inferred 2.2× density (528px sidebar / 240 CSS px); breadcrumb reference by 1.1×. No typography conclusions were drawn from browser zoom alone. Default implementation viewport measured 1705×1185 CSS px, screenshot 1704×1185; subpixel rounding accounts for the width difference.
+Implementation: authenticated issue ISU-0001, Call thread with two existing replies, at desktop and narrow widths. Initial captures: `/tmp/unicom-thread-summary/desktop.png` and `narrow-before.png`. Existing shared white backgrounds, avatar photos, root message and child replies are retained. User additionally requested Reply on every child, appending to the same root sequence.
 
-## Findings and comparison history
+## Findings / comparison history
 
-1. Initial mismatch: generic Tailwind gray palette, 16px navigation, 4px corners, and declared font without a bundled face. Fixed with installed Frappe UI preset and its Inter variable font. Browser computes navigation 14px/420, inactive #525252, active #171717, background #f8f8f8 and radius 8px. Font asset returns HTTP 200. Breadcrumb parents are 16px/400/#7c7c7c, current title 16px/500/#171717; list icon and separators match the reference hierarchy.
-2. First rendered comparison found P2 value alignment drift: equal-width detail columns placed values approximately 160px after labels. Changed to 110px labels plus 12px gap, matching the source's approximately 123px offset. Avatar now uses the issue ID instead of a leading punctuation character from the demonstration title.
-3. The revised column width exposed P2 label wrapping. Added single-line truncation and full-text title attributes. Final rendered verification is recorded below.
+[P1] First rendered candidate 2b4843d stacked its summary content within Frappe UI Button’s default label wrapper. Its fixed 28px height contained an 88px child, overlapping message text on desktop and mobile. Fix applied in 3f1d3f9: explicit flex wrapper for participant avatars/icon/count/chevron; place latest-reply timestamp beside the button in a wrapping action row. No horizontal divider should remain above replies; their section uses a vertical connector.
 
-Typography, spacing, colors, assets, and content were checked. Sidebar rows use the source 28px height/4px gap and 240px rail; white selected row has border/shadow. The right pane uses a 350px rail, ID header, 48px avatar, 20px summary, section borders, aligned gray labels and dark values. Actual UniCom fields, longer issue title, available actions, and existing FeatherIcon glyphs are intentional content differences; CRM-specific entities and unsupported actions were not copied. No raster assets were required. Inter is bundled rather than fetched from a third party.
+Functional browser checks already passed: two child Reply controls, child click opens and focuses the root composer named Reply in thread, and root section has 0px top border and approximately 2px left border. No records were modified. Mounted checks cover root-targeted posting and same-thread draft preservation.
 
-## Verification
+## Final rendered verification
 
-- Sidebar account menu and collapse/expand remain functional. Keyboard Enter on List returns to the list. All Accessible Issues + Stock search + Waiting filter were retained through opening an issue and returning through breadcrumbs.
-- Details collapses/expands and its edit action opens the existing edit dialog; dismissed without saving. Attachments remain private and reachable. Existing comments and communication replies remain present.
-- At measured 1549×364 CSS px, right pane stays below the 48px navbar; scrolling exposes Add private file inside the viewport. At 636×909 CSS px, the sidebar becomes top navigation, breadcrumbs adapt, Create remains reachable, and document scroll width equals viewport width. Viewport overrides were restored.
-- Browser console reported no warnings/errors. Focused build and mounted UI checks passed. Independent scoped reviews passed.
-- Pre-change database backup was created. Initial migration stopped before schema changes because both patch section headers were required; reviewed correction passed the actual Frappe parser and migration succeeded. Existing issue became ISU-0001 without renaming or changing its modified timestamp.
-- Eleven real-database checks passed for unique sequential numbering, immutability, >9999 expansion, repeated backfill idempotence, old-name API compatibility, and two-connection allocation serialization/rollback. Narrow access/private-attachment checks passed for owner, outsider, and Guest. Test transactions rolled back; no test records remained or IDs consumed (series current=1).
-- Later visual revisions changed frontend only; successful exact-backend evidence was reused. Seven compiled assets including Inter font returned HTTP 200. No additional schema migration was run for visual-only fixes.
+Code: `3f1d3f9e42e35035d8bfbfde0538cbfa96cb5d8a`. Full implementation captures: `/tmp/unicom-thread-summary/desktop-final.png` (composer open), `expanded-final.png` (thread open), and `narrow-final.png`. Combined source/implementation comparison: `/tmp/unicom-thread-summary/comparison.png`; focused crop: `summary-row.png`. The source is a focused component capture rather than a complete application viewport, so full-page source comparison is unavailable; the surrounding live application was inspected separately.
 
-Final deployed verification on `2dc4daa25b827b370cf6864d09ecf51a6162f3f8` confirms every detail label remains one line (16.09px), uses ellipsis, and retains its full title. The updated combined reference/implementation image was inspected after these fixes; no actionable P0/P1/P2 differences remain. Attachments collapse and reopen correctly.
+Desktop measured 1643×1185 CSS px; screenshot 1629×1176 px. Crop coordinates were normalized by those measured scale ratios. Reference 512×116 was retained at native dimensions in the combined input. Its avatar/count/latest-activity relationship was compared directly with the rendered summary. UniCom intentionally retains the light Frappe palette, Inter font, existing compact type scale and icons, actual participant count, and absolute site timestamp. The source dark skin, Following action, sample copy and relative-time wording are not part of this adaptation.
+
+The repaired toggle is 28px high and its inner content is 27.36px high, fully contained. The timestamp is a sibling in the wrapping action row. At a measured 364px narrow CSS viewport, the summary button is 155.38px wide within a 210.60px action area; the row expands to 85.78px and places the timestamp below without overlap. The visible mobile capture confirms readable controls and reply text. Document scroll width did not exceed the viewport. Viewport overrides were reset.
+
+The expanded section has 0px top border and approximately 2px left border, preserving a shared white container. Every child has a visible Reply action. Clicking both child entry points opened the same root composer; desktop focus was confirmed in its named textbox. Cancellation and expansion/collapse worked. Mounted checks prove the submitted reply_to remains the original root, the sequence remains flat, and a same-thread draft survives switching reply entry points. No issue records or comments were changed during browser checks.
+
+Fonts, spacing, colors, assets and copy were checked: uploaded participant photos load with existing initials fallback; up to three distinct participants are shown; reply counts and latest time are derived from existing replies; native Frappe type and button styling remain consistent. No custom raster or icon assets were introduced. Browser console had no warnings/errors. Scoped independent review and frontend build passed; release checked all seven assets return HTTP 200. Backend tests and migrations were skipped because backend/schema were untouched.
+
+No remaining actionable P0/P1/P2 findings.
 
 Final result: passed
