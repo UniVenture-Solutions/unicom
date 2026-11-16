@@ -3,6 +3,7 @@ import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { Button, FormControl, Dialog, TextEditor, Badge, Avatar, FeatherIcon, ListView, ListFooter, FileUploader, ErrorMessage, Breadcrumbs, Dropdown } from 'frappe-ui'
 
 const view=ref('mine'), rows=ref([]), issue=ref(null), people=ref([]), error=ref(''), busy=ref(false), page=ref(0), search=ref(''), filter=ref(''), showNew=ref(false), showLog=ref(false), showEdit=ref(false)
+const currentUser=ref(''), sidebarCollapsed=ref(false)
 const commentBody=ref(''), commentError=ref(''), commentEditorKey=ref(0)
 const commentEditor=ref(null), replyEditor=ref(null)
 const replyRoot=ref(null), replyBody=ref(''), replyError=ref(''), replyEditorKey=ref(0), expandedThreads=ref(new Set())
@@ -20,6 +21,7 @@ const mentionOptions=computed(()=>people.value.map(p=>({value:p.name,label:p.ful
 const participants=ref(''), followup=ref(''), editParticipant=ref(''), editFollowup=ref('')
 function add(list, value){if(value && !list.includes(value)) list.push(value)}
 function goDesk(){location.assign('/app')}
+function openHelp(){window.open('https://docs.frappe.io/framework/user/en', '_blank', 'noopener,noreferrer')}
 function logout(){location.assign('/api/method/logout')}
 function csrf(){return window.csrf_token || (document.cookie.match(/(?:^|; )csrf_token=([^;]+)/)||[])[1] || ''}
 async function api(method, data={}, post=false){
@@ -84,27 +86,39 @@ function fieldLabel(key){return ({accountable_owner:'Accountable owner',next_act
 function changeValue(value,key){if(value===null || value===undefined || value==='') return '—'; if(Array.isArray(value)) return value.length ? value.join(', ') : '—'; if(typeof value==='object') return JSON.stringify(value); if(key==='next_action_date') return formatSiteTime(value); return String(value)}
 function changes(event){try{const data=JSON.parse(event.changes||'{}');return Object.entries(data).map(([key,value])=>({label:fieldLabel(key),text:`${changeValue(value?.from,key)} → ${changeValue(value?.to,key)}`,raw:JSON.stringify(value)}))}catch{return event.changes ? [{label:'Changes',text:event.changes,raw:event.changes}] : []}}
 
-onMounted(async()=>{await run(async()=>{people.value=await api('users'); const name=decodeURIComponent(location.pathname.replace(/^\/unicom\/?/,'')); if(name) await open(name,false); else await load()});window.onpopstate=()=>{const name=decodeURIComponent(location.pathname.replace(/^\/unicom\/?/,''));if(name)open(name,false);else{issue.value=null;load()}}})
+onMounted(async()=>{fetch('/api/method/frappe.auth.get_logged_user',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(r=>{currentUser.value=r?.message||''}).catch(()=>{});await run(async()=>{people.value=await api('users'); const name=decodeURIComponent(location.pathname.replace(/^\/unicom\/?/,'')); if(name) await open(name,false); else await load()});window.onpopstate=()=>{const name=decodeURIComponent(location.pathname.replace(/^\/unicom\/?/,''));if(name)open(name,false);else{issue.value=null;load()}}})
 </script>
 <template>
-<div class="min-h-screen md:flex">
-  <aside class="bg-gray-50 border-r border-gray-200 p-4 md:w-60 shrink-0">
-    <div class="px-2 py-3 font-semibold text-lg">UniCom</div>
-    <div class="text-xs text-gray-500 px-2 mt-6 mb-2 uppercase">Issues</div>
-    <nav class="flex md:flex-col gap-1"><Button :variant="view==='mine'?'subtle':'ghost'" class="justify-start" @click="goList('mine')">My Issues</Button><Button :variant="view==='overdue'?'subtle':'ghost'" class="justify-start" @click="goList('overdue')">Overdue</Button><Button :variant="view==='all'?'subtle':'ghost'" class="justify-start" @click="goList('all')">All Accessible Issues</Button></nav>
+<div class="h-screen overflow-hidden flex flex-col md:flex-row">
+  <aside class="bg-gray-50 border-b md:border-b-0 md:border-r border-gray-200 shrink-0 flex flex-col min-w-0" :class="sidebarCollapsed?'md:w-16':'md:w-[248px]'">
+    <div class="p-2 shrink-0">
+      <Dropdown :options="[{label:'Frappe Desk',onClick:goDesk},{label:'Log out',onClick:logout}]" class="w-full">
+        <Button variant="ghost" class="w-full !h-12 !justify-start !px-2" :aria-label="'Account menu'+(currentUser ? ' for '+authorName(currentUser) : '')" :title="currentUser ? authorName(currentUser) : 'Account menu'">
+          <template #prefix><span class="flex items-center justify-center h-8 w-8 rounded-md bg-gray-200 text-gray-700"><FeatherIcon name="message-square" class="h-4 w-4"/></span></template>
+          <span class="min-w-0 text-left" :class="sidebarCollapsed?'md:sr-only':''"><span class="block font-semibold">UniCom</span><span class="block max-w-40 truncate text-xs text-gray-500">{{currentUser ? authorName(currentUser) : 'Account'}}</span></span>
+          <template #suffix><FeatherIcon name="chevron-down" class="ml-auto h-4 w-4 text-gray-500" :class="sidebarCollapsed?'md:hidden':''"/></template>
+        </Button>
+      </Dropdown>
+    </div>
+    <nav aria-label="Issues" class="px-2 pb-2 flex flex-row md:flex-col gap-1 overflow-x-auto md:overflow-x-hidden">
+      <Button v-for="item in [{view:'mine',label:'My Issues',icon:'user'},{view:'overdue',label:'Overdue',icon:'clock'},{view:'all',label:'All Accessible Issues',icon:'list'}]" :key="item.view" :variant="view===item.view?'outline':'ghost'" :icon-left="item.icon" class="!justify-start shrink-0 md:w-full" :class="sidebarCollapsed?'md:!justify-center':''" :aria-label="item.label" :aria-current="view===item.view?'page':undefined" :title="item.label" @click="goList(item.view)"><span :class="sidebarCollapsed?'md:sr-only':''">{{item.label}}</span></Button>
+    </nav>
+    <div class="hidden md:flex mt-auto p-2 flex-col gap-1">
+      <Button variant="ghost" icon-left="help-circle" class="w-full !justify-start" :class="sidebarCollapsed?'!justify-center':''" aria-label="Frappe help" title="Frappe help" @click="openHelp"><span :class="sidebarCollapsed?'sr-only':''">Help</span></Button>
+      <Button variant="ghost" :icon-left="sidebarCollapsed?'chevrons-right':'chevrons-left'" class="w-full !justify-start" :class="sidebarCollapsed?'!justify-center':''" :aria-label="sidebarCollapsed?'Expand sidebar':'Collapse sidebar'" :title="sidebarCollapsed?'Expand sidebar':'Collapse sidebar'" @click="sidebarCollapsed=!sidebarCollapsed"><span :class="sidebarCollapsed?'sr-only':''">{{sidebarCollapsed?'Expand sidebar':'Collapse sidebar'}}</span></Button>
+    </div>
   </aside>
-  <main class="min-w-0 flex-1">
-    <header class="border-b border-gray-200 min-h-16 px-4 sm:px-6 flex items-center justify-between gap-2"><div class="min-w-0 flex-1 overflow-hidden"><Breadcrumbs :items="issue ? [{label:'Issues',onClick:()=>goList(view)},{label:issue.title}] : [{label:'Issues'}]"/></div><div class="flex shrink-0 items-center gap-2 whitespace-nowrap"><Button variant="solid" @click="showNew=true">New issue</Button><Dropdown :options="[{label:'Frappe Desk',onClick:goDesk},{label:'Log out',onClick:logout}]" :button="{label:'Account'}"/></div></header>
+  <main class="min-w-0 min-h-0 flex-1 flex flex-col">
+    <header class="border-b border-gray-200 h-12 shrink-0 px-4 sm:px-6 flex items-center justify-between gap-2"><div class="min-w-0 flex-1 overflow-hidden"><Breadcrumbs :items="issue ? [{label:'Issues',onClick:()=>goList(view)},{label:issue.title}] : [{label:'Issues'},{label:'List'}]"/></div><Button variant="solid" icon-left="plus" class="shrink-0 whitespace-nowrap" @click="showNew=true">Create</Button></header>
     <ErrorMessage v-if="error" class="mx-6 mt-4" :message="safeError"/>
     <template v-if="!issue">
-      <div class="p-6 max-w-6xl mx-auto">
-        <h1 class="text-2xl font-semibold mb-5">{{ view==='mine'?'My Issues':view==='overdue'?'Overdue':'All Accessible Issues' }}</h1>
-        <div class="flex gap-2 mb-4 flex-wrap"><FormControl v-model="search" placeholder="Search title" @keydown.enter="page=0;load()"/><FormControl type="select" v-model="filter" :options="[{label:'All statuses',value:''},...statuses.map(x=>({label:x,value:x}))]" @change="page=0;load()"/><Button @click="page=0;load()">Search</Button></div>
-        <ListView :columns="columns" :rows="rows" row-key="name" :options="{selectable:false,onRowClick:row=>open(row.name),emptyState:{title:'No issues found'}}"><template #cell="{column,row,item}"><Badge v-if="column.key==='status'" :theme="row.overdue?'red':'gray'">{{row.overdue?'Overdue · ':''}}{{item}}</Badge><span v-else class="text-sm truncate">{{item||'—'}}</span></template></ListView>
-        <ListFooter class="mt-4"><template #left><span class="text-sm text-gray-500">Page {{page+1}}</span></template><template #right><div class="flex gap-2"><Button :disabled="page===0" @click="page--;load()">Previous</Button><Button :disabled="rows.length<20" @click="page++;load()">Next</Button></div></template></ListFooter>
+      <div class="min-h-0 flex-1 flex flex-col">
+        <div class="flex gap-2 px-4 sm:px-6 py-4 flex-wrap shrink-0"><FormControl v-model="search" placeholder="Search title" aria-label="Search title" @keydown.enter="page=0;load()"/><FormControl type="select" v-model="filter" aria-label="Filter by status" :options="[{label:'All statuses',value:''},...statuses.map(x=>({label:x,value:x}))]" @change="page=0;load()"/><Button @click="page=0;load()">Search</Button></div>
+        <div class="min-h-0 flex-1 overflow-auto px-4 sm:px-6"><ListView :columns="columns" :rows="rows" row-key="name" :options="{selectable:false,onRowClick:row=>open(row.name),emptyState:{title:'No issues found'}}"><template #cell="{column,row,item}"><Badge v-if="column.key==='status'" :theme="row.overdue?'red':'gray'">{{row.overdue?'Overdue · ':''}}{{item}}</Badge><span v-else-if="column.key==='accountable_owner'" class="flex items-center gap-2 min-w-0"><Avatar size="sm" :label="authorName(item)"/><span class="text-sm truncate">{{authorName(item)}}</span></span><span v-else class="text-sm truncate">{{item||'—'}}</span></template></ListView></div>
+        <ListFooter class="px-4 sm:px-6 py-3 border-t border-gray-200 shrink-0"><template #left><span class="text-sm text-gray-500">Page {{page+1}} · {{rows.length}} {{rows.length===1?'issue':'issues'}} shown</span></template><template #right><div class="flex gap-2"><Button :disabled="page===0" @click="page--;load()">Previous</Button><Button :disabled="rows.length<20" @click="page++;load()">Next</Button></div></template></ListFooter>
       </div>
     </template>
-    <template v-else>
+    <div v-else class="min-h-0 flex-1 overflow-y-auto">
       <div class="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-[auto_1fr]">
         <div class="order-1 w-full min-w-0 max-w-4xl mx-auto p-6 flex flex-wrap justify-between gap-4 items-start"><div class="min-w-0 flex-1 basis-64"><Button variant="ghost" @click="goList(view)">← Back to issues</Button><h1 class="text-2xl font-semibold mt-3 break-words">{{issue.title}}</h1><p class="text-sm text-gray-500 mt-2">{{issue.name}} · Created by {{issue.owner}}</p></div><div class="flex flex-wrap shrink-0 gap-2 whitespace-nowrap"><Button @click="editIssue">Edit / resolve</Button><Button variant="solid" :disabled="issue.status==='Resolved'" @click="logIssue">Log communication</Button></div></div>
         <section class="order-3 lg:order-2 w-full min-w-0 max-w-4xl mx-auto px-6 pb-6 space-y-6 break-words"><div><h2 class="font-semibold mb-2">Description</h2><div class="text-sm text-gray-700" v-html="issue.description || '—'"></div></div><div>
@@ -141,7 +155,7 @@ onMounted(async()=>{await run(async()=>{people.value=await api('users'); const n
         </div></section>
         <aside class="order-2 lg:order-3 min-w-0 space-y-4 border-t lg:border-t-0 lg:border-l p-6 text-sm break-words lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-0 lg:self-start lg:min-h-[calc(100vh-4rem)] lg:max-h-screen lg:overflow-y-auto"><div><div class="text-gray-500">Status</div><div>{{issue.status}} <Badge v-if="issue.overdue" theme="red">Overdue</Badge></div></div><div><div class="text-gray-500">Accountable owner</div>{{issue.accountable_owner}}</div><div><div class="text-gray-500">Next action</div>{{issue.next_action||'—'}} · {{issue.next_action_date||'—'}}</div><div v-if="issue.resolution_note"><div class="text-gray-500">Resolution</div>{{issue.resolution_note}}</div><div><div class="text-gray-500">Participants</div>{{issue.access.filter(x=>x.reason==='Participant').map(x=>x.user).join(', ')||'—'}}</div><div><div class="text-gray-500">Follow-up assignees</div>{{issue.access.filter(x=>x.reason==='Follow-up').map(x=>x.user).join(', ')||'—'}}</div><div><div class="text-gray-500 mb-2">Attachments</div><a v-for="f in issue.attachments" :key="f.name" :href="f.file_url" target="_blank" class="block text-blue-600 underline">{{f.file_name}}</a><FileUploader :upload-args="{upload_endpoint:'/api/method/unicom.api.upload_attachment',docname:issue.name,private:true}" :validate-file="f=>f.size>10*1024*1024?'Maximum attachment size is 10 MB':null" @success="uploadDone"><template #default="{openFileSelector,uploading,error:uploadError}"><Button class="mt-2" :loading="uploading" @click="openFileSelector">Add private file</Button><ErrorMessage :message="uploadError"/></template></FileUploader></div></aside>
       </div>
-    </template>
+    </div>
   </main>
 </div>
 <Dialog v-model="showNew" :options="{title:'New issue',size:'2xl'}"><template #body-content><ErrorMessage v-if="error" class="mb-3" :message="safeError"/><div class="space-y-3"><FormControl v-model="form.title" label="Title"/><FormControl v-model="form.description" type="textarea" label="Description"/><FormControl v-model="form.accountable_owner" type="select" label="Accountable owner" :options="userOptions"/><FormControl v-model="form.next_action" label="Next action"/><FormControl v-model="form.next_action_date" type="date" label="Next action date"/><div><label class="text-sm">Participants</label><div class="flex gap-2"><FormControl v-model="participants" type="select" :options="userOptions"/><Button @click="add(form.participants,participants);participants=''">Add</Button></div><div v-for="u in form.participants" :key="u" class="text-sm">{{u}} <Button variant="ghost" @click="form.participants=form.participants.filter(x=>x!==u)">Remove</Button></div></div><div><label class="text-sm">Follow-up assignees</label><div class="flex gap-2"><FormControl v-model="followup" type="select" :options="userOptions"/><Button @click="add(form.follow_up_assignees,followup);followup=''">Add</Button></div><div v-for="u in form.follow_up_assignees" :key="u" class="text-sm">{{u}} <Button variant="ghost" @click="form.follow_up_assignees=form.follow_up_assignees.filter(x=>x!==u)">Remove</Button></div></div></div></template><template #actions><Button variant="solid" :loading="busy" @click="create">Create issue</Button></template></Dialog>
