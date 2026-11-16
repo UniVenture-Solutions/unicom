@@ -18,7 +18,7 @@
       "fieldname": "kind",
       "label": "Kind",
       "fieldtype": "Select",
-      "options": "Created\nUpdated\nCommunication\nResolved\nReopened",
+      "options": "Created\nUpdated\nCommunication\nResolved\nReopened\nComment",
       "reqd": 1
     },
     {

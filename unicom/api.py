@@ -187,6 +187,30 @@ def log_communication(name, channel, happened_at, body, next_action=None, next_a
     return _output(doc)
 
 
+
+@frappe.whitelist(methods=['POST'])
+def add_comment(name, body):
+    doc = _doc(name, lock=True)
+    if not isinstance(body, str):
+        frappe.throw(_('A comment is required'))
+    clean_body = frappe.utils.sanitize_html(body, always_sanitize=True)
+    parsed = BeautifulSoup(clean_body, 'html.parser')
+    text = parsed.get_text().replace('\u200b', '').replace('\ufeff', '').strip()
+    if not text:
+        frappe.throw(_('A comment is required'))
+    # Only mentions actually present in the retained editor content grant access.
+    mention_nodes = parsed.select('span[data-type="mention"][data-id]')
+    mentioned_users = [node.get('data-id') for node in mention_nodes if node.get_text(strip=True)]
+    for user in _users(mentioned_users):
+        if not any(row.user == user and row.reason == 'Mention' for row in doc.access):
+            doc.append('access', {'user': user, 'reason': 'Mention'})
+    _validate(doc)
+    _event(doc, 'Comment', body=clean_body)
+    doc.flags.unicom_api = True
+    doc.save(ignore_permissions=True)
+    return _output(doc)
+
+
 def _attachment_path(key):
     # These files are outside /private/files and are only exposed through download_attachment.
     if len(key) != 64 or any(c not in '0123456789abcdef' for c in key):
