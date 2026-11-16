@@ -132,7 +132,7 @@ onMounted(async()=>{fetch('/api/method/frappe.auth.get_logged_user',{credentials
           </div>
           <div class="space-y-5">
             <div v-for="thread in timelineThreads" :key="thread.event.name">
-              <article v-if="['Comment','Communication'].includes(thread.event.kind)" class="overflow-hidden rounded border border-gray-200">
+              <article v-if="['Comment','Communication'].includes(thread.event.kind)" class="overflow-hidden rounded border border-gray-200 bg-white">
                 <div class="flex gap-3 p-4"><Avatar size="xl" :label="authorName(thread.event.actor)"/>
                 <div class="min-w-0 flex-1">
                   <div class="flex flex-wrap items-center gap-x-2 gap-y-1"><span class="text-sm font-semibold">{{authorName(thread.event.actor)}}</span><Badge theme="gray">{{thread.event.channel || thread.event.kind}}</Badge><span class="text-xs text-gray-500" :title="'Recorded: '+thread.event.recorded_at">{{formatSiteTime(thread.event.recorded_at)}}</span></div>
@@ -145,7 +145,7 @@ onMounted(async()=>{fetch('/api/method/frappe.auth.get_logged_user',{credentials
                     <Button v-if="thread.replies.length" variant="ghost" size="sm" :disabled="replyRoot===thread.event.name" :aria-expanded="expandedThreads.has(thread.event.name)" :aria-controls="'thread-'+thread.event.name" :aria-label="(expandedThreads.has(thread.event.name)?'Hide ':'Show ')+thread.replies.length+' replies to '+authorName(thread.event.actor)" @click="toggleThread(thread.event.name)">{{expandedThreads.has(thread.event.name)?'Hide replies':thread.replies.length+' '+(thread.replies.length===1?'reply':'replies')}}</Button>
                   </div>
                 </div></div>
-                  <div v-if="expandedThreads.has(thread.event.name)" :id="'thread-'+thread.event.name" class="border-t border-gray-200 bg-gray-50 px-4 py-3 sm:pl-[3.75rem] space-y-3">
+                  <div v-if="expandedThreads.has(thread.event.name)" :id="'thread-'+thread.event.name" class="border-t border-gray-200 px-4 py-3 sm:pl-[3.75rem] space-y-3">
                     <div v-for="reply in thread.replies" :key="reply.name" class="flex gap-2"><Avatar size="md" :label="authorName(reply.actor)"/><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-x-2"><span class="text-sm font-medium">{{authorName(reply.actor)}}</span><span class="text-xs text-gray-500" :title="'Recorded: '+reply.recorded_at">{{formatSiteTime(reply.recorded_at)}}</span></div><div class="text-sm text-gray-800 mt-1" v-html="reply.body"></div></div></div>
                     <div v-if="replyRoot===thread.event.name" class="space-y-2"><div :id="'reply-editor-label-'+thread.event.name" class="text-xs font-medium text-gray-600">Reply to {{authorName(thread.event.actor)}}</div><TextEditor :ref="component=>setReplyEditor(component,thread.event.name)" :key="replyEditorKey" class="timeline-editor" :content="replyBody" :mentions="mentionOptions" placeholder="Write a reply; type @ to mention someone" @change="value=>replyBody=value"/><ErrorMessage :message="safeReplyError"/><div class="flex justify-end gap-2"><Button :disabled="busy" @click="cancelReply">Cancel</Button><Button variant="solid" :loading="busy" :disabled="busy" @click="saveReply(thread.event.name)">Post reply</Button></div></div>
                   </div>
