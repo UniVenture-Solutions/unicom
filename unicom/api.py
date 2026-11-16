@@ -1,5 +1,4 @@
 """The only mutation surface for UniCom records; generic document writes are denied."""
-import base64
 import json
 from bs4 import BeautifulSoup
 
@@ -7,6 +6,7 @@ import frappe
 from frappe import _
 from frappe.utils import getdate, now_datetime, today
 from frappe.utils.file_manager import save_file
+from unicom.permissions import issue_permission
 
 STATUSES = ('Open', 'In Progress', 'Waiting', 'Resolved')
 CHANNELS = ('Internal Note', 'Call', 'Meeting', 'Email', 'WhatsApp')
@@ -82,7 +82,7 @@ def _doc(name, lock=False):
         # Serialize updates before fetching, preserving timeline and current action under concurrency.
         frappe.db.sql('SELECT name FROM `tabUniCom Issue` WHERE name=%s FOR UPDATE', name)
     doc = frappe.get_doc('UniCom Issue', name)
-    if not frappe.has_permission('UniCom Issue', 'read', doc=doc):
+    if not issue_permission(doc, user=frappe.session.user, ptype='read'):
         frappe.throw(_('Not permitted'), frappe.PermissionError)
     return doc
 
@@ -186,11 +186,13 @@ def log_communication(name, channel, happened_at, body, next_action=None, next_a
 
 
 @frappe.whitelist(methods=['POST'])
-def upload_attachment(name, filename, content):
-    _doc(name, lock=True)
+def upload_attachment(docname):
+    _doc(docname, lock=True)
+    uploaded = frappe.request.files.get('file')
+    if not uploaded: frappe.throw(_('File is required'))
+    filename = uploaded.filename
     if not filename or '/' in filename or '\\' in filename: frappe.throw(_('Invalid filename'))
-    try: data = base64.b64decode(content, validate=True)
-    except Exception: frappe.throw(_('Invalid file content'))
+    data = uploaded.stream.read(10 * 1024 * 1024 + 1)
     if len(data) > 10 * 1024 * 1024: frappe.throw(_('Maximum attachment size is 10 MB'))
-    file = save_file(filename, data, 'UniCom Issue', name, is_private=1)
+    file = save_file(filename, data, 'UniCom Issue', docname, is_private=1)
     return {'name': file.name, 'file_name': file.file_name, 'file_url': file.file_url}
