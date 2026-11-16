@@ -4,10 +4,12 @@ import { Button, FormControl, Dialog, TextEditor, Badge, Avatar, FeatherIcon, Li
 
 const view=ref('mine'), rows=ref([]), issue=ref(null), people=ref([]), error=ref(''), busy=ref(false), page=ref(0), search=ref(''), filter=ref(''), showNew=ref(false), showLog=ref(false), showEdit=ref(false)
 const currentUser=ref(''), sidebarCollapsed=ref(false), pageLength=ref(20), detailsOpen=ref(true), attachmentsOpen=ref(true)
+const timelineCategories=['Comments','Communications','Notes','Activity']
+const timelineSelection=ref(new Set(timelineCategories))
 const commentBody=ref(''), commentError=ref(''), commentEditorKey=ref(0)
 const commentEditor=ref(null), replyEditor=ref(null)
 const replyRoot=ref(null), replyBody=ref(''), replyError=ref(''), replyEditorKey=ref(0), replyWindowSizes=ref({})
-watch(() => issue.value?.name, () => { commentBody.value=''; commentError.value=''; commentEditorKey.value++; replyRoot.value=null; replyBody.value=''; replyError.value=''; replyEditorKey.value++; replyWindowSizes.value={} }, {flush:'sync'})
+watch(() => issue.value?.name, () => { commentBody.value=''; commentError.value=''; commentEditorKey.value++; replyRoot.value=null; replyBody.value=''; replyError.value=''; replyEditorKey.value++; replyWindowSizes.value={}; timelineSelection.value=new Set(timelineCategories) }, {flush:'sync'})
 const blank=()=>({title:'',description:'',accountable_owner:'',coordination_user:'',next_action:'',next_action_date:'',participants:[],follow_up_assignees:[]})
 const form=reactive(blank()), edit=reactive({}), log=reactive({channel:'Internal Note',happened_at:'',contact:'',body:'',next_action:'',next_action_date:'',resolution_note:''})
 const columns = [{label:'Issue ID',key:'issue_id',width:'1.3fr'},{label:'Issue',key:'title',width:'3fr'},{label:'Status',key:'status',width:'1.5fr'},{label:'Issue Owner',key:'accountable_owner',width:'2fr'},{label:'Next action date',key:'next_action_date',width:'1.5fr'}]
@@ -15,6 +17,12 @@ const safeError = computed(() => { const el=document.createElement('div'); el.te
 const safeCommentError = computed(() => { const el=document.createElement('div'); el.textContent=commentError.value; return el.innerHTML })
 const safeReplyError = computed(() => { const el=document.createElement('div'); el.textContent=replyError.value; return el.innerHTML })
 const timelineThreads = computed(() => { const events=issue.value?.timeline || []; const replies=new Map(); for(const event of events) if(event.reply_to){if(!replies.has(event.reply_to)) replies.set(event.reply_to,[]); replies.get(event.reply_to).push(event)} return events.filter(event=>!event.reply_to).reverse().map(event=>({event,replies:replies.get(event.name)||[]})) })
+const allTimelineSelected=computed(()=>timelineSelection.value.size===timelineCategories.length)
+function timelineCategory(event){if(event.kind==='Comment')return 'Comments';if(event.kind==='Communication')return event.channel==='Internal Note'?'Notes':'Communications';return 'Activity'}
+const filteredThreads=computed(()=>timelineThreads.value.filter(thread=>timelineSelection.value.has(timelineCategory(thread.event))))
+const hiddenReplyDraft=computed(()=>!!replyRoot.value && !filteredThreads.value.some(thread=>thread.event.name===replyRoot.value))
+function selectAllTimeline(){timelineSelection.value=new Set(timelineCategories)}
+function toggleTimelineCategory(category){const next=allTimelineSelected.value?new Set():new Set(timelineSelection.value);if(next.has(category))next.delete(category);else next.add(category);timelineSelection.value=next}
 const statuses=['Open','In Progress','Waiting','Resolved'], channels=['Internal Note','Call','Meeting','Email','WhatsApp']
 const userOptions=computed(()=>[{label:'Select user',value:''},...people.value.map(p=>({label:p.full_name+' ('+p.name+')',value:p.name}))])
 const coordinationOptions=computed(()=>[{label:'Select user',value:''},...people.value.filter(p=>p.user_type==='System User').map(p=>({label:p.full_name+' ('+p.name+')',value:p.name}))])
@@ -130,13 +138,15 @@ onMounted(async()=>{fetch('/api/method/frappe.auth.get_logged_user',{credentials
       <div class="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_350px] lg:grid-rows-[auto_1fr]">
         <div class="order-1 w-full min-w-0 max-w-4xl mx-auto p-6 flex flex-wrap justify-between gap-4 items-start"><div class="min-w-0 flex-1 basis-64"><Button variant="ghost" @click="goList(view)">← Back to issues</Button><h1 class="text-2xl font-semibold mt-3 break-words">{{issue.title}}</h1><p class="text-sm text-gray-500 mt-2">{{issue.issue_id || issue.name}} · Created by {{authorName(issue.owner)}}</p></div><div class="flex flex-wrap shrink-0 gap-2 whitespace-nowrap"><Button @click="editIssue">Edit / resolve</Button><Button variant="solid" :disabled="issue.status==='Resolved'" @click="logIssue">Log communication</Button></div></div>
         <section class="order-3 lg:order-2 w-full min-w-0 max-w-4xl mx-auto px-6 pb-6 space-y-6 break-words"><div><h2 class="font-semibold mb-2">Description</h2><div class="text-sm text-gray-700" v-html="issue.description || '—'"></div></div><div>
-          <h2 class="font-semibold mb-4">Timeline</h2>
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-4"><h2 class="font-semibold">Timeline</h2><div role="group" aria-label="Filter timeline" class="flex flex-wrap gap-1"><Button size="sm" :variant="allTimelineSelected?'subtle':'ghost'" :aria-pressed="allTimelineSelected" @click="selectAllTimeline">All</Button><Button v-for="category in timelineCategories" :key="category" size="sm" :variant="!allTimelineSelected && timelineSelection.has(category)?'subtle':'ghost'" :aria-pressed="!allTimelineSelected && timelineSelection.has(category)" @click="toggleTimelineCategory(category)">{{category}}</Button></div></div>
           <div class="mb-8 rounded-lg border border-gray-200 p-3 space-y-2">
             <div id="comment-editor-label" class="text-xs font-medium text-gray-600">Add a comment</div><TextEditor :ref="setCommentEditor" :key="commentEditorKey" class="timeline-editor" :content="commentBody" :mentions="mentionOptions" placeholder="Write a comment; type @ to mention someone" @change="value=>commentBody=value"/>
             <ErrorMessage :message="safeCommentError"/><div class="flex justify-end"><Button variant="solid" :loading="busy" :disabled="busy" @click="saveComment">Post comment</Button></div>
           </div>
+          <div v-if="hiddenReplyDraft" class="mb-4 text-xs text-gray-600">A reply draft is in a hidden thread. Select its category or All to continue.</div>
+          <div v-if="!filteredThreads.length" class="py-4 text-sm text-gray-600">{{timelineSelection.size ? 'No entries match the selected filters.' : 'Select a category to see timeline entries.'}} <Button size="sm" variant="ghost" @click="selectAllTimeline">Show all</Button></div>
           <div class="space-y-5">
-            <div v-for="thread in timelineThreads" :key="thread.event.name">
+            <div v-for="thread in filteredThreads" :key="thread.event.name">
               <article v-if="['Comment','Communication'].includes(thread.event.kind)" class="overflow-hidden rounded border border-gray-200 bg-white">
                 <div class="flex gap-3 p-4"><Avatar :key="thread.event.actor+userImage(thread.event.actor)" size="xl" :label="authorName(thread.event.actor)" :image="userImage(thread.event.actor)"/>
                 <div class="min-w-0 flex-1">
