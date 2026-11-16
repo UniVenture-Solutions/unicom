@@ -55,11 +55,27 @@ class CoordinationTests(unittest.TestCase):
         self.assertEqual(json.loads(self.doc.timeline[-1].changes)['coordination_user'], {'from':'coordinator','to':None})
 
     def test_reject_disabled_guest_website_and_invalid_type(self):
-        for value in ('disabled', 'Guest', 'website', 123):
+        for value in ('disabled', 'Guest', 'website', 123, 0, False, []):
             with self.subTest(value=value), self.assertRaises((ValueError, frappe.ValidationError)):
                 api.update_issue('issue', {'coordination_user':value})
             self.assertFalse(self.doc.saved)
             self.doc.coordination_user = None
+
+    def test_inactive_existing_coordinator_does_not_block_other_work(self):
+        for inactive in ('disabled', 'website'):
+            with self.subTest(inactive=inactive):
+                self.doc.coordination_user = inactive
+                api.update_issue('issue', {'title':'Changed', 'coordination_user':inactive})
+                api.add_comment('issue', '<p>Discussion</p>')
+                api.log_communication('issue', 'Call', '2026-11-16 12:00:00', '<p>Called</p>', next_action='Call again', next_action_date='2026-11-21')
+                self.assertEqual(self.doc.coordination_user, inactive)
+                self.assertEqual([event.kind for event in self.doc.timeline[-3:]], ['Updated','Comment','Communication'])
+                with self.assertRaises(ValueError): api.update_issue('issue', {'coordination_user':'disabled' if inactive=='website' else 'website'})
+
+    def test_create_rejects_falsey_nonstring(self):
+        for value in (0, False, []):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                api.create_issue('Issue', 'owner', 'Call', '2026-11-20', coordination_user=value)
 
     def test_coordinator_alone_gets_no_access(self):
         api.update_issue('issue', {'coordination_user':'coordinator'})

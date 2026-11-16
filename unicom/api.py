@@ -39,15 +39,23 @@ def _users(values):
     return values
 
 
+
+def _coordination_selection(value, current=None):
+    if value is None or (isinstance(value, str) and value == ''):
+        return None
+    if not isinstance(value, str):
+        frappe.throw(_('Coordinating user must be a user ID'))
+    if value != current:
+        _users([value])
+        if frappe.db.get_value('User', value, 'user_type') != 'System User':
+            frappe.throw(_('Coordinating user must be an enabled system user'))
+    return value
+
+
 def _validate(doc):
     if not (doc.title or '').strip():
         frappe.throw(_('Title is required'))
     _users([doc.accountable_owner])
-    coordination_user = getattr(doc, 'coordination_user', None)
-    if coordination_user:
-        _users([coordination_user])
-        if frappe.db.get_value('User', coordination_user, 'user_type') != 'System User':
-            frappe.throw(_('Coordinating user must be an enabled system user'))
     if doc.status not in STATUSES:
         frappe.throw(_('Invalid status'))
     if doc.status == 'Resolved':
@@ -141,7 +149,7 @@ def get_issue(name):
 def create_issue(title, accountable_owner, next_action, next_action_date, description='', participants=None, follow_up_assignees=None, coordination_user=None):
     _user()
     doc = frappe.new_doc('UniCom Issue')
-    doc.update({'title': title, 'description': frappe.utils.sanitize_html(description or '', always_sanitize=True), 'accountable_owner': accountable_owner, 'coordination_user': None if coordination_user is None or coordination_user == '' else coordination_user, 'status': 'Open', 'next_action': next_action, 'next_action_date': next_action_date})
+    doc.update({'title': title, 'description': frappe.utils.sanitize_html(description or '', always_sanitize=True), 'accountable_owner': accountable_owner, 'coordination_user': _coordination_selection(coordination_user), 'status': 'Open', 'next_action': next_action, 'next_action_date': next_action_date})
     _set_users(doc, 'Participant', participants)
     _set_users(doc, 'Follow-up', follow_up_assignees)
     _validate(doc)
@@ -161,7 +169,7 @@ def update_issue(name, values):
     for key, val in values.items():
         if key == 'participants': _set_users(doc, 'Participant', val)
         elif key == 'follow_up_assignees': _set_users(doc, 'Follow-up', val)
-        elif key == 'coordination_user': doc.coordination_user = None if val is None or val == '' else val
+        elif key == 'coordination_user': doc.coordination_user = _coordination_selection(val, current=getattr(doc, 'coordination_user', None))
         elif key == 'description': doc.description = frappe.utils.sanitize_html(val or '', always_sanitize=True)
         else: doc.set(key, val)
     _validate(doc)
