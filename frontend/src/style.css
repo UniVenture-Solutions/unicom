@@ -14,5 +14,6 @@ body { margin: 0; font-family: InterVar, ui-sans-serif, system-ui, sans-serif; -
 .unicom-breadcrumbs button > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Place the installed fixed menu below the editor. */
-.rich-editor { display: flex; flex-direction: column; }
-.rich-editor > .inline-flex { order: 1; border-radius: 0 0 .5rem .5rem; }
+.rich-editor { @apply border border-gray-200 rounded-lg; display: flex; flex-direction: column; min-width: 0; }
+.rich-editor .ProseMirror { width: 100%; max-width: none; border: 0; border-radius: 0; box-shadow: none; }
+.rich-editor > .inline-flex { @apply border-0 border-t border-gray-200 rounded-none; order: 1; width: 100%; }
