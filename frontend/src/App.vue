@@ -51,6 +51,7 @@ async function saveComment(){
   catch(e){if(issue.value?.name===name) commentError.value=e.message}
   finally{busy.value=false}
 }
+function replyParticipants(thread){return [...new Set(thread.replies.map(reply=>reply.actor).filter(Boolean))].slice(0,3)}
 function toggleThread(root){const next=new Set(expandedThreads.value); if(next.has(root)) next.delete(root); else next.add(root); expandedThreads.value=next}
 function labelEditor(component, current, labelId){
   if(!component) return
@@ -142,12 +143,17 @@ onMounted(async()=>{fetch('/api/method/frappe.auth.get_logged_user',{credentials
                   <p v-if="thread.event.contact" class="text-xs text-gray-500 mt-1">Contact: {{thread.event.contact}}</p>
                   <div v-if="thread.event.body" class="text-sm text-gray-800 mt-2" v-html="thread.event.body"></div>
                   <p v-for="change in changes(thread.event)" :key="change.label" class="text-xs text-gray-600 mt-1" :title="change.raw">{{change.label}}: {{change.text}}</p>
-                  <div class="flex items-center gap-2 mt-2">
+                  <div class="flex flex-wrap items-center gap-2 mt-2">
                     <Button variant="ghost" size="sm" :disabled="busy || (replyRoot && replyRoot!==thread.event.name)" :aria-label="'Reply to '+authorName(thread.event.actor)" @click="startReply(thread.event.name)">Reply</Button>
-                    <Button v-if="thread.replies.length" variant="ghost" size="sm" :disabled="replyRoot===thread.event.name" :aria-expanded="expandedThreads.has(thread.event.name)" :aria-controls="'thread-'+thread.event.name" :aria-label="(expandedThreads.has(thread.event.name)?'Hide ':'Show ')+thread.replies.length+' replies to '+authorName(thread.event.actor)" @click="toggleThread(thread.event.name)">{{expandedThreads.has(thread.event.name)?'Hide replies':thread.replies.length+' '+(thread.replies.length===1?'reply':'replies')}}</Button>
+                    <Button v-if="thread.replies.length" variant="ghost" size="sm" :disabled="replyRoot===thread.event.name" :aria-expanded="expandedThreads.has(thread.event.name)" :aria-controls="'thread-'+thread.event.name" @click="toggleThread(thread.event.name)">
+                      <span class="flex -space-x-2" aria-hidden="true"><Avatar v-for="user in replyParticipants(thread)" :key="user+userImage(user)" size="md" class="rounded-full ring-2 ring-white" :label="authorName(user)" :image="userImage(user)"/></span>
+                      <FeatherIcon name="corner-up-left" class="h-4 w-4 text-gray-600" aria-hidden="true"/><span>{{thread.replies.length}} {{thread.replies.length===1?'reply':'replies'}}</span>
+                      <span class="text-xs text-gray-500" :title="'Last reply: '+thread.replies[thread.replies.length-1].recorded_at">Last reply {{formatSiteTime(thread.replies[thread.replies.length-1].recorded_at)}}</span>
+                      <FeatherIcon :name="expandedThreads.has(thread.event.name)?'chevron-up':'chevron-down'" class="h-4 w-4 text-gray-600" aria-hidden="true"/>
+                    </Button>
                   </div>
                 </div></div>
-                  <div v-if="expandedThreads.has(thread.event.name)" :id="'thread-'+thread.event.name" class="border-t border-gray-200 px-4 py-3 sm:pl-[3.75rem] space-y-3">
+                  <div v-if="expandedThreads.has(thread.event.name)" :id="'thread-'+thread.event.name" class="ml-6 sm:ml-[3.75rem] mr-4 mb-4 border-l-2 border-gray-200 pl-3 space-y-3">
                     <div v-for="reply in thread.replies" :key="reply.name" class="flex gap-2"><Avatar :key="reply.actor+userImage(reply.actor)" size="md" :label="authorName(reply.actor)" :image="userImage(reply.actor)"/><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-x-2"><span class="text-sm font-medium">{{authorName(reply.actor)}}</span><span class="text-xs text-gray-500" :title="'Recorded: '+reply.recorded_at">{{formatSiteTime(reply.recorded_at)}}</span></div><div class="text-sm text-gray-800 mt-1" v-html="reply.body"></div></div></div>
                     <div v-if="replyRoot===thread.event.name" class="space-y-2"><div :id="'reply-editor-label-'+thread.event.name" class="text-xs font-medium text-gray-600">Reply to {{authorName(thread.event.actor)}}</div><TextEditor :ref="component=>setReplyEditor(component,thread.event.name)" :key="replyEditorKey" class="timeline-editor" :content="replyBody" :mentions="mentionOptions" placeholder="Write a reply; type @ to mention someone" @change="value=>replyBody=value"/><ErrorMessage :message="safeReplyError"/><div class="flex justify-end gap-2"><Button :disabled="busy" @click="cancelReply">Cancel</Button><Button variant="solid" :loading="busy" :disabled="busy" @click="saveReply(thread.event.name)">Post reply</Button></div></div>
                   </div>
