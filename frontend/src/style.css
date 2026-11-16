@@ -7,7 +7,7 @@
 body { margin: 0; font-family: InterVar, ui-sans-serif, system-ui, sans-serif; -webkit-font-smoothing: antialiased; color: #171717; background: #fff; }
 .ProseMirror { min-height: 100px; padding: .75rem; border: 1px solid #e5e7eb; border-radius: .375rem; outline: none; }
 
-.timeline-editor .ProseMirror { min-height: 3rem; }
+.timeline-editor .ProseMirror { min-height: 3rem; max-width: none; width: 100%; }
 
 .unicom-breadcrumbs button { min-width: 0; }
 .unicom-breadcrumbs button:not(:last-child) { font-weight: 400; }
