@@ -1,9 +1,10 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { Button, FormControl, Dialog, TextEditor, Badge, ListView, ListFooter, FileUploader, ErrorMessage, Breadcrumbs, Dropdown } from 'frappe-ui'
 
 const view=ref('mine'), rows=ref([]), issue=ref(null), people=ref([]), error=ref(''), busy=ref(false), page=ref(0), search=ref(''), filter=ref(''), showNew=ref(false), showLog=ref(false), showEdit=ref(false)
 const commentBody=ref(''), commentError=ref(''), commentEditorKey=ref(0)
+watch(() => issue.value?.name, () => { commentBody.value=''; commentError.value=''; commentEditorKey.value++ }, {flush:'sync'})
 const blank=()=>({title:'',description:'',accountable_owner:'',next_action:'',next_action_date:'',participants:[],follow_up_assignees:[]})
 const form=reactive(blank()), edit=reactive({}), log=reactive({channel:'Internal Note',happened_at:'',contact:'',body:'',next_action:'',next_action_date:'',resolution_note:''})
 const columns = [{label:'Issue',key:'title',width:'3fr'},{label:'Status',key:'status',width:'1.5fr'},{label:'Owner',key:'accountable_owner',width:'2fr'},{label:'Next action date',key:'next_action_date',width:'1.5fr'}]
@@ -25,7 +26,7 @@ async function api(method, data={}, post=false){
 }
 async function run(fn){busy.value=true; error.value=''; try{await fn()}catch(e){error.value=e.message}finally{busy.value=false}}
 async function load(){await run(async()=>{rows.value=await api('list_issues',{view:view.value,status:filter.value,search:search.value,start:page.value*20,page_length:20})})}
-async function open(name,push=true){await run(async()=>{if (issue.value?.name !== name) { commentBody.value=''; commentError.value=''; commentEditorKey.value++ } issue.value=await api('get_issue',{name}); if(push) history.pushState({},'', '/unicom/'+encodeURIComponent(name))})}
+async function open(name,push=true){await run(async()=>{issue.value=await api('get_issue',{name}); if(push) history.pushState({},'', '/unicom/'+encodeURIComponent(name))})}
 function goList(v){view.value=v;issue.value=null;page.value=0;history.pushState({},'','/unicom');load()}
 function resetForm(){Object.assign(form,blank())}
 async function create(){await run(async()=>{const doc=await api('create_issue',form,true);showNew.value=false;resetForm();issue.value=doc;history.pushState({},'','/unicom/'+encodeURIComponent(doc.name))})}
@@ -38,7 +39,7 @@ async function saveComment(){
   busy.value=true; commentError.value=''
   const name=issue.value.name
   try { const updated=await api('add_comment',{name,body:commentBody.value},true); if(issue.value?.name===name){issue.value=updated;commentBody.value='';commentEditorKey.value++} }
-  catch(e){commentError.value=e.message}
+  catch(e){if(issue.value?.name===name) commentError.value=e.message}
   finally{busy.value=false}
 }
 async function uploadDone(){ await open(issue.value.name,false) }
