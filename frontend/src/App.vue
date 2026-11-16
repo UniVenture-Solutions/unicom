@@ -4,7 +4,7 @@ import { Button, FormControl, Dialog, TextEditor, Badge, Avatar, FeatherIcon, Li
 
 const view=ref('mine'), rows=ref([]), issue=ref(null), people=ref([]), error=ref(''), busy=ref(false), page=ref(0), search=ref(''), filter=ref(''), showNew=ref(false), showLog=ref(false), showEdit=ref(false)
 const commentBody=ref(''), commentError=ref(''), commentEditorKey=ref(0)
-const replyEditor=ref(null)
+const commentEditor=ref(null), replyEditor=ref(null)
 const replyRoot=ref(null), replyBody=ref(''), replyError=ref(''), replyEditorKey=ref(0), expandedThreads=ref(new Set())
 watch(() => issue.value?.name, () => { commentBody.value=''; commentError.value=''; commentEditorKey.value++; replyRoot.value=null; replyBody.value=''; replyError.value=''; replyEditorKey.value++; expandedThreads.value=new Set() }, {flush:'sync'})
 const blank=()=>({title:'',description:'',accountable_owner:'',next_action:'',next_action_date:'',participants:[],follow_up_assignees:[]})
@@ -47,14 +47,18 @@ async function saveComment(){
   finally{busy.value=false}
 }
 function toggleThread(root){const next=new Set(expandedThreads.value); if(next.has(root)) next.delete(root); else next.add(root); expandedThreads.value=next}
-function labelEditor(component, labelId){
-  const editor=component?.editor
-  if(!editor) return
-  const props=editor.options.editorProps || {}
-  editor.setOptions({editorProps:{...props,attributes:{...props.attributes,role:'textbox','aria-multiline':'true','aria-labelledby':labelId}}})
+function labelEditor(component, current, labelId){
+  if(!component) return
+  nextTick(()=>{
+    if(current.value!==component) return
+    const editor=component.editor
+    if(!editor || editor.isDestroyed) return
+    const props=editor.options.editorProps || {}
+    editor.setOptions({editorProps:{...props,attributes:{...props.attributes,role:'textbox','aria-multiline':'true','aria-labelledby':labelId}}})
+  })
 }
-function setCommentEditor(component){labelEditor(component,'comment-editor-label')}
-function setReplyEditor(component,root){replyEditor.value=component;labelEditor(component,'reply-editor-label-'+root)}
+function setCommentEditor(component){commentEditor.value=component;labelEditor(component,commentEditor,'comment-editor-label')}
+function setReplyEditor(component,root){replyEditor.value=component;labelEditor(component,replyEditor,'reply-editor-label-'+root)}
 function startReply(root){if(replyRoot.value!==root){replyRoot.value=root;replyBody.value='';replyError.value='';replyEditorKey.value++} const next=new Set(expandedThreads.value);next.add(root);expandedThreads.value=next;nextTick(()=>replyEditor.value?.editor?.commands.focus())}
 function cancelReply(){replyRoot.value=null;replyBody.value='';replyError.value='';replyEditorKey.value++}
 async function saveReply(root){
