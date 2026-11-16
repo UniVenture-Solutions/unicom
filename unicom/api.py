@@ -189,8 +189,15 @@ def log_communication(name, channel, happened_at, body, next_action=None, next_a
 
 
 @frappe.whitelist(methods=['POST'])
-def add_comment(name, body):
+def add_comment(name, body, reply_to=None):
     doc = _doc(name, lock=True)
+    if reply_to:
+        if not isinstance(reply_to, str):
+            frappe.throw(_('Invalid reply target'))
+        parent = next((event for event in doc.timeline if getattr(event, 'name', None) == reply_to), None)
+        # Only roots of this issue can be replied to; nested reply targets are rejected.
+        if not parent or parent.kind not in ('Comment', 'Communication') or getattr(parent, 'reply_to', None):
+            frappe.throw(_('Invalid reply target'))
     if not isinstance(body, str):
         frappe.throw(_('A comment is required'))
     clean_body = frappe.utils.sanitize_html(body, always_sanitize=True)
@@ -205,7 +212,7 @@ def add_comment(name, body):
         if not any(row.user == user and row.reason == 'Mention' for row in doc.access):
             doc.append('access', {'user': user, 'reason': 'Mention'})
     _validate(doc)
-    _event(doc, 'Comment', body=clean_body)
+    _event(doc, 'Comment', body=clean_body, reply_to=reply_to or None)
     doc.flags.unicom_api = True
     doc.save(ignore_permissions=True)
     return _output(doc)

@@ -11,7 +11,8 @@
     "channel",
     "contact",
     "body",
-    "changes"
+    "changes",
+    "reply_to"
   ],
   "fields": [
     {
@@ -59,6 +60,12 @@
       "fieldname": "changes",
       "label": "Changes",
       "fieldtype": "Long Text"
+    },
+    {
+      "fieldname": "reply_to",
+      "label": "Reply To",
+      "fieldtype": "Data",
+      "read_only": 1
     }
   ],
   "istable": 1
