@@ -1,0 +1,10 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "unicom"
+version = "0.1.0"
+description = "Issue coordination for Frappe"
+requires-python = ">=3.10"
+[tool.setuptools.packages.find]
+include = ["unicom*"]

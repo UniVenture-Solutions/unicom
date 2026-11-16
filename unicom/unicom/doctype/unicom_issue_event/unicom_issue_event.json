@@ -1,0 +1,65 @@
+{
+  "doctype": "DocType",
+  "name": "UniCom Issue Event",
+  "module": "UniCom",
+  "engine": "InnoDB",
+  "field_order": [
+    "kind",
+    "actor",
+    "recorded_at",
+    "happened_at",
+    "channel",
+    "contact",
+    "body",
+    "changes"
+  ],
+  "fields": [
+    {
+      "fieldname": "kind",
+      "label": "Kind",
+      "fieldtype": "Select",
+      "options": "Created\nUpdated\nCommunication\nResolved\nReopened",
+      "reqd": 1
+    },
+    {
+      "fieldname": "actor",
+      "label": "Actor",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "recorded_at",
+      "label": "Recorded At",
+      "fieldtype": "Datetime",
+      "reqd": 1
+    },
+    {
+      "fieldname": "happened_at",
+      "label": "Happened At",
+      "fieldtype": "Datetime"
+    },
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Select",
+      "options": "\nInternal Note\nCall\nMeeting\nEmail\nWhatsApp"
+    },
+    {
+      "fieldname": "contact",
+      "label": "Contact / Person",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "body",
+      "label": "Outcome / Body",
+      "fieldtype": "Text Editor"
+    },
+    {
+      "fieldname": "changes",
+      "label": "Changes",
+      "fieldtype": "Long Text"
+    }
+  ],
+  "istable": 1
+}

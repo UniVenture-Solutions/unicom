@@ -1,0 +1,87 @@
+{
+  "doctype": "DocType",
+  "name": "UniCom Issue",
+  "module": "UniCom",
+  "engine": "InnoDB",
+  "field_order": [
+    "title",
+    "description",
+    "accountable_owner",
+    "status",
+    "next_action",
+    "next_action_date",
+    "resolution_note",
+    "access",
+    "timeline"
+  ],
+  "fields": [
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "description",
+      "label": "Description",
+      "fieldtype": "Text Editor"
+    },
+    {
+      "fieldname": "accountable_owner",
+      "label": "Accountable Owner",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Open\nIn Progress\nWaiting\nResolved",
+      "default": "Open",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "next_action",
+      "label": "Next Action",
+      "fieldtype": "Small Text"
+    },
+    {
+      "fieldname": "next_action_date",
+      "label": "Next Action Date",
+      "fieldtype": "Date",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "resolution_note",
+      "label": "Resolution Note",
+      "fieldtype": "Small Text"
+    },
+    {
+      "fieldname": "access",
+      "label": "Access",
+      "fieldtype": "Table",
+      "options": "UniCom Issue Access"
+    },
+    {
+      "fieldname": "timeline",
+      "label": "Timeline",
+      "fieldtype": "Table",
+      "options": "UniCom Issue Event"
+    }
+  ],
+  "autoname": "hash",
+  "title_field": "title",
+  "track_changes": 0,
+  "permissions": [
+    {
+      "role": "All",
+      "read": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC"
+}

@@ -1,0 +1,29 @@
+{
+  "doctype": "DocType",
+  "name": "UniCom Issue Access",
+  "module": "UniCom",
+  "engine": "InnoDB",
+  "field_order": [
+    "user",
+    "reason"
+  ],
+  "fields": [
+    {
+      "fieldname": "user",
+      "label": "User",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "reason",
+      "label": "Reason",
+      "fieldtype": "Select",
+      "options": "Participant\nFollow-up\nMention",
+      "reqd": 1,
+      "in_list_view": 1
+    }
+  ],
+  "istable": 1
+}
