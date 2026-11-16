@@ -47,7 +47,14 @@ async function saveComment(){
   finally{busy.value=false}
 }
 function toggleThread(root){const next=new Set(expandedThreads.value); if(next.has(root)) next.delete(root); else next.add(root); expandedThreads.value=next}
-function setReplyEditor(editor){replyEditor.value=editor}
+function labelEditor(component, labelId){
+  const editor=component?.editor
+  if(!editor) return
+  const props=editor.options.editorProps || {}
+  editor.setOptions({editorProps:{...props,attributes:{...props.attributes,role:'textbox','aria-multiline':'true','aria-labelledby':labelId}}})
+}
+function setCommentEditor(component){labelEditor(component,'comment-editor-label')}
+function setReplyEditor(component,root){replyEditor.value=component;labelEditor(component,'reply-editor-label-'+root)}
 function startReply(root){if(replyRoot.value!==root){replyRoot.value=root;replyBody.value='';replyError.value='';replyEditorKey.value++} const next=new Set(expandedThreads.value);next.add(root);expandedThreads.value=next;nextTick(()=>replyEditor.value?.editor?.commands.focus())}
 function cancelReply(){replyRoot.value=null;replyBody.value='';replyError.value='';replyEditorKey.value++}
 async function saveReply(root){
@@ -99,7 +106,7 @@ onMounted(async()=>{await run(async()=>{people.value=await api('users'); const n
         <section class="order-3 lg:order-2 w-full min-w-0 max-w-4xl mx-auto px-6 pb-6 space-y-6 break-words"><div><h2 class="font-semibold mb-2">Description</h2><div class="text-sm text-gray-700" v-html="issue.description || '—'"></div></div><div>
           <h2 class="font-semibold mb-4">Timeline</h2>
           <div class="mb-8 rounded-lg border border-gray-200 p-3 space-y-2">
-            <TextEditor :key="commentEditorKey" class="timeline-editor" :content="commentBody" :mentions="mentionOptions" placeholder="Write a comment; type @ to mention someone" @change="value=>commentBody=value"/>
+            <div id="comment-editor-label" class="text-xs font-medium text-gray-600">Add a comment</div><TextEditor :ref="setCommentEditor" :key="commentEditorKey" class="timeline-editor" :content="commentBody" :mentions="mentionOptions" placeholder="Write a comment; type @ to mention someone" @change="value=>commentBody=value"/>
             <ErrorMessage :message="safeCommentError"/><div class="flex justify-end"><Button variant="solid" :loading="busy" :disabled="busy" @click="saveComment">Post comment</Button></div>
           </div>
           <div class="space-y-5">
@@ -118,7 +125,7 @@ onMounted(async()=>{await run(async()=>{people.value=await api('users'); const n
                   </div>
                   <div v-if="expandedThreads.has(thread.event.name)" :id="'thread-'+thread.event.name" class="mt-3 border-l-2 border-gray-200 bg-gray-50 rounded-r-lg px-4 py-3 space-y-4">
                     <div v-for="reply in thread.replies" :key="reply.name" class="flex gap-2"><Avatar size="md" :label="authorName(reply.actor)"/><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-x-2"><span class="text-sm font-medium">{{authorName(reply.actor)}}</span><span class="text-xs text-gray-500" :title="'Recorded: '+reply.recorded_at">{{formatSiteTime(reply.recorded_at)}}</span></div><div class="text-sm text-gray-800 mt-1" v-html="reply.body"></div></div></div>
-                    <div v-if="replyRoot===thread.event.name" class="space-y-2"><div class="text-xs font-medium text-gray-600">Reply to {{authorName(thread.event.actor)}}</div><TextEditor :ref="setReplyEditor" :key="replyEditorKey" class="timeline-editor" :content="replyBody" :mentions="mentionOptions" placeholder="Write a reply; type @ to mention someone" @change="value=>replyBody=value"/><ErrorMessage :message="safeReplyError"/><div class="flex justify-end gap-2"><Button :disabled="busy" @click="cancelReply">Cancel</Button><Button variant="solid" :loading="busy" :disabled="busy" @click="saveReply(thread.event.name)">Post reply</Button></div></div>
+                    <div v-if="replyRoot===thread.event.name" class="space-y-2"><div :id="'reply-editor-label-'+thread.event.name" class="text-xs font-medium text-gray-600">Reply to {{authorName(thread.event.actor)}}</div><TextEditor :ref="component=>setReplyEditor(component,thread.event.name)" :key="replyEditorKey" class="timeline-editor" :content="replyBody" :mentions="mentionOptions" placeholder="Write a reply; type @ to mention someone" @change="value=>replyBody=value"/><ErrorMessage :message="safeReplyError"/><div class="flex justify-end gap-2"><Button :disabled="busy" @click="cancelReply">Cancel</Button><Button variant="solid" :loading="busy" :disabled="busy" @click="saveReply(thread.event.name)">Post reply</Button></div></div>
                   </div>
                 </div>
               </article>
