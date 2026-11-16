@@ -1,0 +1,40 @@
+{
+  "doctype": "DocType",
+  "name": "UniCom Issue Attachment",
+  "module": "UniCom",
+  "engine": "InnoDB",
+  "istable": 1,
+  "field_order": [
+    "file_name",
+    "storage_key",
+    "uploaded_by",
+    "uploaded_at"
+  ],
+  "fields": [
+    {
+      "fieldname": "file_name",
+      "label": "File Name",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "storage_key",
+      "label": "Storage Key",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "uploaded_by",
+      "label": "Uploaded By",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "uploaded_at",
+      "label": "Uploaded At",
+      "fieldtype": "Datetime",
+      "reqd": 1
+    }
+  ]
+}

@@ -36,13 +36,16 @@ class WorkflowTests(unittest.TestCase):
             doc.status = 'Open'; doc.next_action = ''
             with self.assertRaises(ValueError): api._validate(doc)
 
-    def test_attached_file_access_follows_issue_not_uploader(self):
-        issue = Doc(owner='creator', accountable_owner='owner', access=[])
-        file = Doc(attached_to_doctype='UniCom Issue', attached_to_name='i', is_private=1, owner='former')
-        with patch.object(frappe, 'get_doc', return_value=issue):
-            self.assertFalse(permissions.file_permission(file, 'former', 'read'))
-            self.assertTrue(permissions.file_permission(file, 'owner', 'read'))
-            file.is_private = 0
-            self.assertFalse(permissions.file_permission(file, 'owner', 'read'))
+    def test_revoked_uploader_cannot_download_using_old_url(self):
+        issue = Doc(owner='creator', accountable_owner='owner', access=[], attachments=[Doc(name='file1', storage_key='a'*64, file_name='secret')])
+        def throw(message, exception=None): raise PermissionError(message)
+        with patch.object(api, '_user', return_value='former'), patch.object(frappe, 'session', Doc(user='former')), patch.object(frappe, 'get_doc', return_value=issue), patch.object(frappe, 'throw', side_effect=throw), patch('builtins.open') as opener:
+            with self.assertRaises(PermissionError): api.download_attachment('issue1', 'file1')
+            opener.assert_not_called()
+
+    def test_attachment_storage_key_cannot_escape_private_directory(self):
+        def throw(message, *args): raise ValueError(message)
+        with patch.object(frappe, 'throw', side_effect=throw):
+            with self.assertRaises(ValueError): api._attachment_path('../files/secret')
 
 if __name__ == '__main__': unittest.main()

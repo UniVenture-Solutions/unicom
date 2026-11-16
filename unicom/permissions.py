@@ -22,14 +22,3 @@ def issue_permission(doc, user=None, ptype=None, debug=False):
         return False
     return bool(doc.owner == user or doc.accountable_owner == user or any(row.user == user for row in doc.access))
 
-
-def file_permission(doc, user=None, ptype=None, debug=False):
-    if doc.attached_to_doctype != 'UniCom Issue' or not doc.attached_to_name:
-        return True
-    if not doc.is_private:
-        return False
-    try:
-        issue = frappe.get_doc('UniCom Issue', doc.attached_to_name)
-    except frappe.DoesNotExistError:
-        return False
-    return issue_permission(issue, user=user, ptype='read' if ptype in (None, 'read', 'select') else ptype)

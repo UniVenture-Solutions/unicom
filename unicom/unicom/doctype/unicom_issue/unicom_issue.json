@@ -12,7 +12,8 @@
     "next_action_date",
     "resolution_note",
     "access",
-    "timeline"
+    "timeline",
+    "attachments"
   ],
   "fields": [
     {
@@ -71,6 +72,12 @@
       "label": "Timeline",
       "fieldtype": "Table",
       "options": "UniCom Issue Event"
+    },
+    {
+      "fieldname": "attachments",
+      "label": "Attachments",
+      "fieldtype": "Table",
+      "options": "UniCom Issue Attachment"
     }
   ],
   "autoname": "hash",

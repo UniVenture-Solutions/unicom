@@ -1,11 +1,13 @@
 """The only mutation surface for UniCom records; generic document writes are denied."""
 import json
+import os
+import secrets
+from urllib.parse import urlencode
 from bs4 import BeautifulSoup
 
 import frappe
 from frappe import _
 from frappe.utils import getdate, now_datetime, today
-from frappe.utils.file_manager import save_file
 from unicom.permissions import issue_permission
 
 STATUSES = ('Open', 'In Progress', 'Waiting', 'Resolved')
@@ -90,7 +92,7 @@ def _doc(name, lock=False):
 def _output(doc):
     result = doc.as_dict()
     result['overdue'] = bool(doc.status != 'Resolved' and doc.next_action_date and getdate(doc.next_action_date) < getdate(today()))
-    result['attachments'] = frappe.get_all('File', filters={'attached_to_doctype': 'UniCom Issue', 'attached_to_name': doc.name, 'is_private': 1}, fields=['name', 'file_name', 'file_url', 'creation'])
+    result['attachments'] = [{'name': row.name, 'file_name': row.file_name, 'file_url': '/api/method/unicom.api.download_attachment?' + urlencode({'name': doc.name, 'attachment': row.name}), 'creation': row.uploaded_at} for row in doc.attachments]
     return result
 
 
@@ -185,14 +187,44 @@ def log_communication(name, channel, happened_at, body, next_action=None, next_a
     return _output(doc)
 
 
+def _attachment_path(key):
+    # These files are outside /private/files and are only exposed through download_attachment.
+    if len(key) != 64 or any(c not in '0123456789abcdef' for c in key):
+        frappe.throw(_('Invalid attachment'))
+    return frappe.get_site_path('private', 'unicom', key)
+
+
 @frappe.whitelist(methods=['POST'])
 def upload_attachment(docname):
-    _doc(docname, lock=True)
+    doc = _doc(docname, lock=True)
     uploaded = frappe.request.files.get('file')
     if not uploaded: frappe.throw(_('File is required'))
     filename = uploaded.filename
     if not filename or '/' in filename or '\\' in filename: frappe.throw(_('Invalid filename'))
     data = uploaded.stream.read(10 * 1024 * 1024 + 1)
     if len(data) > 10 * 1024 * 1024: frappe.throw(_('Maximum attachment size is 10 MB'))
-    file = save_file(filename, data, 'UniCom Issue', docname, is_private=1)
-    return {'name': file.name, 'file_name': file.file_name, 'file_url': file.file_url}
+    key = secrets.token_hex(32)
+    path = _attachment_path(key)
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    try:
+        with open(path, 'xb') as target:
+            target.write(data)
+        os.chmod(path, 0o600)
+        doc.append('attachments', {'file_name': filename, 'storage_key': key, 'uploaded_by': _user(), 'uploaded_at': now_datetime()})
+        doc.flags.unicom_api = True
+        doc.save(ignore_permissions=True)
+    except Exception:
+        if os.path.exists(path): os.unlink(path)
+        raise
+    return _output(doc)['attachments'][-1]
+
+
+@frappe.whitelist()
+def download_attachment(name, attachment):
+    doc = _doc(name)
+    row = next((row for row in doc.attachments if row.name == attachment), None)
+    if not row: frappe.throw(_('Attachment not found'), frappe.DoesNotExistError)
+    with open(_attachment_path(row.storage_key), 'rb') as source:
+        frappe.response.filecontent = source.read()
+    frappe.response.filename = row.file_name
+    frappe.response.type = 'download'
