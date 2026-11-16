@@ -6,8 +6,8 @@ const view=ref('mine'), rows=ref([]), issue=ref(null), people=ref([]), error=ref
 const currentUser=ref(''), sidebarCollapsed=ref(false), pageLength=ref(20), detailsOpen=ref(true), attachmentsOpen=ref(true)
 const commentBody=ref(''), commentError=ref(''), commentEditorKey=ref(0)
 const commentEditor=ref(null), replyEditor=ref(null)
-const replyRoot=ref(null), replyBody=ref(''), replyError=ref(''), replyEditorKey=ref(0), expandedThreads=ref(new Set())
-watch(() => issue.value?.name, () => { commentBody.value=''; commentError.value=''; commentEditorKey.value++; replyRoot.value=null; replyBody.value=''; replyError.value=''; replyEditorKey.value++; expandedThreads.value=new Set() }, {flush:'sync'})
+const replyRoot=ref(null), replyBody=ref(''), replyError=ref(''), replyEditorKey=ref(0), replyWindowSizes=ref({})
+watch(() => issue.value?.name, () => { commentBody.value=''; commentError.value=''; commentEditorKey.value++; replyRoot.value=null; replyBody.value=''; replyError.value=''; replyEditorKey.value++; replyWindowSizes.value={} }, {flush:'sync'})
 const blank=()=>({title:'',description:'',accountable_owner:'',coordination_user:'',next_action:'',next_action_date:'',participants:[],follow_up_assignees:[]})
 const form=reactive(blank()), edit=reactive({}), log=reactive({channel:'Internal Note',happened_at:'',contact:'',body:'',next_action:'',next_action_date:'',resolution_note:''})
 const columns = [{label:'Issue ID',key:'issue_id',width:'1.3fr'},{label:'Issue',key:'title',width:'3fr'},{label:'Status',key:'status',width:'1.5fr'},{label:'Issue Owner',key:'accountable_owner',width:'2fr'},{label:'Next action date',key:'next_action_date',width:'1.5fr'}]
@@ -52,7 +52,9 @@ async function saveComment(){
   finally{busy.value=false}
 }
 function replyParticipants(thread){return [...new Set(thread.replies.map(reply=>reply.actor).filter(Boolean))].slice(0,3)}
-function toggleThread(root){const next=new Set(expandedThreads.value); if(next.has(root)) next.delete(root); else next.add(root); expandedThreads.value=next}
+function visibleReplies(thread){return thread.replies.slice(-(replyWindowSizes.value[thread.event.name] || 3))}
+function earlierReplyCount(thread){return Math.max(0,thread.replies.length-visibleReplies(thread).length)}
+function loadEarlierReplies(root){replyWindowSizes.value={...replyWindowSizes.value,[root]:(replyWindowSizes.value[root] || 3)+3};if(replyRoot.value===root) nextTick(()=>{if(replyRoot.value===root) replyEditor.value?.editor?.commands.focus()})}
 function labelEditor(component, current, labelId){
   if(!component) return
   nextTick(()=>{
@@ -65,7 +67,7 @@ function labelEditor(component, current, labelId){
 }
 function setCommentEditor(component){commentEditor.value=component;labelEditor(component,commentEditor,'comment-editor-label')}
 function setReplyEditor(component,root){replyEditor.value=component;labelEditor(component,replyEditor,'reply-editor-label-'+root)}
-function startReply(root){if(replyRoot.value!==root){replyRoot.value=root;replyBody.value='';replyError.value='';replyEditorKey.value++} const next=new Set(expandedThreads.value);next.add(root);expandedThreads.value=next;nextTick(()=>replyEditor.value?.editor?.commands.focus())}
+function startReply(root){if(replyRoot.value!==root){replyRoot.value=root;replyBody.value='';replyError.value='';replyEditorKey.value++} nextTick(()=>replyEditor.value?.editor?.commands.focus())}
 function cancelReply(){replyRoot.value=null;replyBody.value='';replyError.value='';replyEditorKey.value++}
 async function saveReply(root){
   if(busy.value || replyRoot.value!==root) return
@@ -145,15 +147,15 @@ onMounted(async()=>{fetch('/api/method/frappe.auth.get_logged_user',{credentials
                   <p v-for="change in changes(thread.event)" :key="change.label" class="text-xs text-gray-600 mt-1" :title="change.raw">{{change.label}}: {{change.text}}</p>
                   <div class="flex flex-wrap items-center gap-2 mt-2">
                     <Button variant="ghost" size="sm" :disabled="busy || (replyRoot && replyRoot!==thread.event.name)" :aria-label="'Reply to '+authorName(thread.event.actor)" @click="startReply(thread.event.name)">Reply</Button>
-                    <Button v-if="thread.replies.length" variant="ghost" size="sm" class="max-w-full" :disabled="replyRoot===thread.event.name" :aria-expanded="expandedThreads.has(thread.event.name)" :aria-controls="'thread-'+thread.event.name" @click="toggleThread(thread.event.name)">
-                      <span class="inline-flex items-center gap-2"><span class="flex -space-x-2" aria-hidden="true"><Avatar v-for="user in replyParticipants(thread)" :key="user+userImage(user)" size="md" class="rounded-full ring-2 ring-white" :label="authorName(user)" :image="userImage(user)"/></span>
+                    <span v-if="thread.replies.length" class="inline-flex max-w-full items-center gap-2 text-base text-gray-700">
+                      <span class="flex -space-x-2" aria-hidden="true"><Avatar v-for="user in replyParticipants(thread)" :key="user+userImage(user)" size="md" class="rounded-full ring-2 ring-white" :label="authorName(user)" :image="userImage(user)"/></span>
                       <FeatherIcon name="corner-up-left" class="h-4 w-4 text-gray-600" aria-hidden="true"/><span class="whitespace-nowrap">{{thread.replies.length}} {{thread.replies.length===1?'reply':'replies'}}</span>
-                      <FeatherIcon :name="expandedThreads.has(thread.event.name)?'chevron-up':'chevron-down'" class="h-4 w-4 text-gray-600" aria-hidden="true"/></span>
-                    </Button><span v-if="thread.replies.length" class="text-xs text-gray-500" :title="'Last reply: '+thread.replies[thread.replies.length-1].recorded_at">Last reply {{formatSiteTime(thread.replies[thread.replies.length-1].recorded_at)}}</span>
+                    </span><span v-if="thread.replies.length" class="text-xs text-gray-500" :title="'Last reply: '+thread.replies[thread.replies.length-1].recorded_at">Last reply {{formatSiteTime(thread.replies[thread.replies.length-1].recorded_at)}}</span>
                   </div>
                 </div></div>
-                  <div v-if="expandedThreads.has(thread.event.name)" :id="'thread-'+thread.event.name" class="ml-6 sm:ml-[3.75rem] mr-4 mb-4 border-l-2 border-gray-200 pl-3 space-y-3">
-                    <div v-for="reply in thread.replies" :key="reply.name" class="flex gap-2"><Avatar :key="reply.actor+userImage(reply.actor)" size="md" :label="authorName(reply.actor)" :image="userImage(reply.actor)"/><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-x-2"><span class="text-sm font-medium">{{authorName(reply.actor)}}</span><span class="text-xs text-gray-500" :title="'Recorded: '+reply.recorded_at">{{formatSiteTime(reply.recorded_at)}}</span></div><div class="text-sm text-gray-800 mt-1" v-html="reply.body"></div><Button variant="ghost" size="sm" class="mt-1" :disabled="busy || (replyRoot && replyRoot!==thread.event.name)" :aria-label="'Reply to '+authorName(reply.actor)+' in this thread'" @click="startReply(thread.event.name)">Reply<span class="sr-only"> to {{authorName(reply.actor)}} in this thread</span></Button></div></div>
+                  <div v-if="thread.replies.length || replyRoot===thread.event.name" :id="'thread-'+thread.event.name" class="ml-6 sm:ml-[3.75rem] mr-4 mb-4 border-l-2 border-gray-200 pl-3 space-y-3">
+                    <Button v-if="earlierReplyCount(thread)" variant="ghost" size="sm" @click="loadEarlierReplies(thread.event.name)">Load more replies ({{earlierReplyCount(thread)}} earlier)</Button>
+                    <div v-for="reply in visibleReplies(thread)" :key="reply.name" class="flex gap-2"><Avatar :key="reply.actor+userImage(reply.actor)" size="md" :label="authorName(reply.actor)" :image="userImage(reply.actor)"/><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-x-2"><span class="text-sm font-medium">{{authorName(reply.actor)}}</span><span class="text-xs text-gray-500" :title="'Recorded: '+reply.recorded_at">{{formatSiteTime(reply.recorded_at)}}</span></div><div class="text-sm text-gray-800 mt-1" v-html="reply.body"></div><Button variant="ghost" size="sm" class="mt-1" :disabled="busy || (replyRoot && replyRoot!==thread.event.name)" :aria-label="'Reply to '+authorName(reply.actor)+' in this thread'" @click="startReply(thread.event.name)">Reply<span class="sr-only"> to {{authorName(reply.actor)}} in this thread</span></Button></div></div>
                     <div v-if="replyRoot===thread.event.name" class="space-y-2"><div :id="'reply-editor-label-'+thread.event.name" class="text-xs font-medium text-gray-600">Reply in thread</div><TextEditor :ref="component=>setReplyEditor(component,thread.event.name)" :key="replyEditorKey" class="timeline-editor" :content="replyBody" :mentions="mentionOptions" placeholder="Write a reply; type @ to mention someone" @change="value=>replyBody=value"/><ErrorMessage :message="safeReplyError"/><div class="flex justify-end gap-2"><Button :disabled="busy" @click="cancelReply">Cancel</Button><Button variant="solid" :loading="busy" :disabled="busy" @click="saveReply(thread.event.name)">Post reply</Button></div></div>
                   </div>
               </article>
