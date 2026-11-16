@@ -145,12 +145,11 @@ onMounted(async()=>{fetch('/api/method/frappe.auth.get_logged_user',{credentials
                   <p v-for="change in changes(thread.event)" :key="change.label" class="text-xs text-gray-600 mt-1" :title="change.raw">{{change.label}}: {{change.text}}</p>
                   <div class="flex flex-wrap items-center gap-2 mt-2">
                     <Button variant="ghost" size="sm" :disabled="busy || (replyRoot && replyRoot!==thread.event.name)" :aria-label="'Reply to '+authorName(thread.event.actor)" @click="startReply(thread.event.name)">Reply</Button>
-                    <Button v-if="thread.replies.length" variant="ghost" size="sm" :disabled="replyRoot===thread.event.name" :aria-expanded="expandedThreads.has(thread.event.name)" :aria-controls="'thread-'+thread.event.name" @click="toggleThread(thread.event.name)">
-                      <span class="flex -space-x-2" aria-hidden="true"><Avatar v-for="user in replyParticipants(thread)" :key="user+userImage(user)" size="md" class="rounded-full ring-2 ring-white" :label="authorName(user)" :image="userImage(user)"/></span>
-                      <FeatherIcon name="corner-up-left" class="h-4 w-4 text-gray-600" aria-hidden="true"/><span>{{thread.replies.length}} {{thread.replies.length===1?'reply':'replies'}}</span>
-                      <span class="text-xs text-gray-500" :title="'Last reply: '+thread.replies[thread.replies.length-1].recorded_at">Last reply {{formatSiteTime(thread.replies[thread.replies.length-1].recorded_at)}}</span>
-                      <FeatherIcon :name="expandedThreads.has(thread.event.name)?'chevron-up':'chevron-down'" class="h-4 w-4 text-gray-600" aria-hidden="true"/>
-                    </Button>
+                    <Button v-if="thread.replies.length" variant="ghost" size="sm" class="max-w-full" :disabled="replyRoot===thread.event.name" :aria-expanded="expandedThreads.has(thread.event.name)" :aria-controls="'thread-'+thread.event.name" @click="toggleThread(thread.event.name)">
+                      <span class="inline-flex items-center gap-2"><span class="flex -space-x-2" aria-hidden="true"><Avatar v-for="user in replyParticipants(thread)" :key="user+userImage(user)" size="md" class="rounded-full ring-2 ring-white" :label="authorName(user)" :image="userImage(user)"/></span>
+                      <FeatherIcon name="corner-up-left" class="h-4 w-4 text-gray-600" aria-hidden="true"/><span class="whitespace-nowrap">{{thread.replies.length}} {{thread.replies.length===1?'reply':'replies'}}</span>
+                      <FeatherIcon :name="expandedThreads.has(thread.event.name)?'chevron-up':'chevron-down'" class="h-4 w-4 text-gray-600" aria-hidden="true"/></span>
+                    </Button><span v-if="thread.replies.length" class="text-xs text-gray-500" :title="'Last reply: '+thread.replies[thread.replies.length-1].recorded_at">Last reply {{formatSiteTime(thread.replies[thread.replies.length-1].recorded_at)}}</span>
                   </div>
                 </div></div>
                   <div v-if="expandedThreads.has(thread.event.name)" :id="'thread-'+thread.event.name" class="ml-6 sm:ml-[3.75rem] mr-4 mb-4 border-l-2 border-gray-200 pl-3 space-y-3">
