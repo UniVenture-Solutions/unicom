@@ -116,12 +116,12 @@ def list_issues(view='all', status=None, search=None, start=0, page_length=20):
     if search:
         filters['title'] = ['like', '%' + search + '%']
     # frappe.get_list applies both role permissions and issue_query.
-    rows = frappe.get_list('UniCom Issue', filters=filters, fields=['name', 'title', 'status', 'accountable_owner', 'owner', 'next_action', 'next_action_date', 'modified'], order_by='modified desc', limit_start=max(0, int(start)), limit_page_length=min(100, max(1, int(page_length)))) if view != 'mine' else None
+    rows = frappe.get_list('UniCom Issue', filters=filters, fields=['name', 'issue_id', 'title', 'status', 'accountable_owner', 'owner', 'next_action', 'next_action_date', 'modified'], order_by='modified desc', limit_start=max(0, int(start)), limit_page_length=min(100, max(1, int(page_length)))) if view != 'mine' else None
     if view == 'mine':
         # Query filter must be combined with access permissions before pagination.
         u = frappe.db.escape(user)
         filters['name'] = ['in', [r.name for r in frappe.db.sql(f'''SELECT DISTINCT i.name FROM `tabUniCom Issue` i LEFT JOIN `tabUniCom Issue Access` a ON a.parent=i.name AND a.parenttype='UniCom Issue' AND a.parentfield='access' WHERE i.owner={u} OR i.accountable_owner={u} OR (a.user={u} AND a.reason IN ('Participant','Follow-up'))''', as_dict=True)] or ['']]
-        rows = frappe.get_list('UniCom Issue', filters=filters, fields=['name','title','status','accountable_owner','owner','next_action','next_action_date','modified'], order_by='modified desc', limit_start=max(0,int(start)), limit_page_length=min(100,max(1,int(page_length))))
+        rows = frappe.get_list('UniCom Issue', filters=filters, fields=['name','issue_id','title','status','accountable_owner','owner','next_action','next_action_date','modified'], order_by='modified desc', limit_start=max(0,int(start)), limit_page_length=min(100,max(1,int(page_length))))
     for row in rows:
         row['overdue'] = bool(row.status != 'Resolved' and row.next_action_date and getdate(row.next_action_date) < getdate(today()))
     return rows

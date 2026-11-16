@@ -4,6 +4,7 @@
   "module": "UniCom",
   "engine": "InnoDB",
   "field_order": [
+    "issue_id",
     "title",
     "description",
     "accountable_owner",
@@ -16,6 +17,14 @@
     "attachments"
   ],
   "fields": [
+    {
+      "fieldname": "issue_id",
+      "label": "Issue ID",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "unique": 1,
+      "in_list_view": 1
+    },
     {
       "fieldname": "title",
       "label": "Title",
