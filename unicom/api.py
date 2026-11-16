@@ -1,8 +1,11 @@
 """The only mutation surface for UniCom records; generic document writes are denied."""
+import io
 import json
 import os
 import secrets
 from urllib.parse import urlencode
+from PIL import Image, UnidentifiedImageError
+from werkzeug.wrappers import Response
 from bs4 import BeautifulSoup
 
 import frappe
@@ -50,6 +53,46 @@ def _coordination_selection(value, current=None):
         if frappe.db.get_value('User', value, 'user_type') != 'System User':
             frappe.throw(_('Coordinating user must be an enabled system user'))
     return value
+
+
+def _image_url(doc, attachment):
+    return '/api/method/unicom.api.inline_image?' + urlencode({'name': doc.name, 'attachment': attachment})
+
+
+def _decoded_image(data):
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            if image.format not in ('PNG', 'JPEG', 'GIF', 'WEBP') or image.width * image.height > 25000000:
+                raise ValueError('Unsupported image')
+            image.load()
+            image = image.convert('RGBA' if 'A' in image.getbands() else 'RGB')
+            output = io.BytesIO()
+            image.save(output, format='PNG')
+            return output.getvalue()
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+        frappe.throw(_('Invalid or unsupported image'))
+
+
+def _rich_html(value, doc=None):
+    if not isinstance(value, str):
+        frappe.throw(_('Invalid rich text'))
+    parsed = BeautifulSoup(value, 'html.parser')
+    for node in parsed.find_all(True):
+        if node.name in ('video', 'audio', 'source', 'track', 'picture', 'iframe', 'object', 'embed', 'svg', 'math', 'link', 'style') or node.has_attr('srcset') or node.has_attr('poster') or node.has_attr('background') or 'url(' in node.get('style', '').lower():
+            frappe.throw(_('Unsupported embedded content'))
+        if node.name != 'img' and node.has_attr('src'):
+            frappe.throw(_('Unsupported embedded content'))
+    attachments = {row.name: row for row in getattr(doc, 'attachments', [])} if doc else {}
+    urls = {_image_url(doc, name): row for name, row in attachments.items()} if doc else {}
+    for node in parsed.find_all('img'):
+        src = node.get('src', '')
+        row = urls.get(src)
+        if not row:
+            frappe.throw(_('Images must be private attachments of this issue'))
+        with open(_attachment_path(row.storage_key), 'rb') as source:
+            _decoded_image(source.read())
+        node.attrs = {'src': _image_url(doc, row.name), 'alt': node.get('alt', '')}
+    return frappe.utils.sanitize_html(str(parsed), always_sanitize=True)
 
 
 def _validate(doc):
@@ -155,7 +198,7 @@ def get_issue(name):
 def create_issue(title, accountable_owner, next_action, next_action_date, description='', participants=None, follow_up_assignees=None, coordination_user=None):
     _user()
     doc = frappe.new_doc('UniCom Issue')
-    doc.update({'title': title, 'description': frappe.utils.sanitize_html(description or '', always_sanitize=True), 'accountable_owner': accountable_owner, 'coordination_user': _coordination_selection(coordination_user), 'status': 'Open', 'next_action': next_action, 'next_action_date': next_action_date})
+    doc.update({'title': title, 'description': _rich_html(description or ''), 'accountable_owner': accountable_owner, 'coordination_user': _coordination_selection(coordination_user), 'status': 'Open', 'next_action': next_action, 'next_action_date': next_action_date})
     _set_users(doc, 'Participant', participants)
     _set_users(doc, 'Follow-up', follow_up_assignees)
     _validate(doc)
@@ -176,8 +219,8 @@ def update_issue(name, values):
         if key == 'participants': _set_users(doc, 'Participant', val)
         elif key == 'follow_up_assignees': _set_users(doc, 'Follow-up', val)
         elif key == 'coordination_user': doc.coordination_user = _coordination_selection(val, current=getattr(doc, 'coordination_user', None))
-        elif key == 'description': doc.description = frappe.utils.sanitize_html(val or '', always_sanitize=True)
-        else: doc.set(key, val)
+        elif key == 'description' and (val or '') != (doc.description or ''): doc.description = _rich_html(val or '', doc)
+        elif key != 'description': doc.set(key, val)
     _validate(doc)
     kind = 'Resolved' if before['status'] != 'Resolved' and doc.status == 'Resolved' else 'Reopened' if before['status'] == 'Resolved' and doc.status != 'Resolved' else 'Updated'
     _event(doc, kind, before)
@@ -201,7 +244,7 @@ def log_communication(name, channel, happened_at, body, next_action=None, next_a
     for user in _users(mentioned_users):
         if not any(r.user == user and r.reason == 'Mention' for r in doc.access): doc.append('access', {'user': user, 'reason': 'Mention'})
     _validate(doc)
-    _event(doc, 'Communication', before, channel=channel, happened_at=happened_at, body=frappe.utils.sanitize_html(body, always_sanitize=True), contact=contact)
+    _event(doc, 'Communication', before, channel=channel, happened_at=happened_at, body=_rich_html(body, doc), contact=contact)
     doc.flags.unicom_api = True
     doc.save(ignore_permissions=True)
     return _output(doc)
@@ -220,10 +263,10 @@ def add_comment(name, body, reply_to=None):
             frappe.throw(_('Invalid reply target'))
     if not isinstance(body, str):
         frappe.throw(_('A comment is required'))
-    clean_body = frappe.utils.sanitize_html(body, always_sanitize=True)
+    clean_body = _rich_html(body, doc)
     parsed = BeautifulSoup(clean_body, 'html.parser')
     text = parsed.get_text().replace('\u200b', '').replace('\ufeff', '').strip()
-    if not text:
+    if not text and not parsed.find('img'):
         frappe.throw(_('A comment is required'))
     # Only mentions actually present in the retained editor content grant access.
     mention_nodes = parsed.select('span[data-type="mention"][data-id]')
@@ -246,7 +289,7 @@ def _attachment_path(key):
 
 
 @frappe.whitelist(methods=['POST'])
-def upload_attachment(docname):
+def upload_attachment(docname, image_only=False):
     doc = _doc(docname, lock=True)
     uploaded = frappe.request.files.get('file')
     if not uploaded: frappe.throw(_('File is required'))
@@ -254,6 +297,7 @@ def upload_attachment(docname):
     if not filename or '/' in filename or '\\' in filename: frappe.throw(_('Invalid filename'))
     data = uploaded.stream.read(10 * 1024 * 1024 + 1)
     if len(data) > 10 * 1024 * 1024: frappe.throw(_('Maximum attachment size is 10 MB'))
+    if image_only in (True, 1, '1', 'true'): _decoded_image(data)
     key = secrets.token_hex(32)
     path = _attachment_path(key)
     os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
@@ -279,3 +323,18 @@ def download_attachment(name, attachment):
         frappe.response.filecontent = source.read()
     frappe.response.filename = row.file_name
     frappe.response.type = 'download'
+
+
+@frappe.whitelist()
+def inline_image(name, attachment):
+    doc = _doc(name)
+    row = next ( (row for row in doc.attachments if row.name == attachment), None)
+    if not row: frappe.throw(_('Attachment not found'), frappe.DoesNotExistError)
+    with open(_attachment_path(row.storage_key), 'rb') as source:
+        data = _decoded_image(source.read())
+    return Response(data, content_type='image/png', headers={'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store'})
+
+
+@frappe.whitelist(methods=['POST'])
+def upload_image(docname):
+    return upload_attachment(docname, image_only=True)
