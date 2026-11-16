@@ -1,10 +1,11 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
-import { Button, FormControl, Dialog, TextEditor, Badge, Avatar, FeatherIcon, ListView, ListFooter, FileUploader, ErrorMessage, Breadcrumbs, Dropdown, Popover } from 'frappe-ui'
+import { Button, FormControl, Dialog, TextEditor, Badge, Avatar, FeatherIcon, ListView, ListFooter, FileUploader, ErrorMessage, Breadcrumbs, Dropdown, Popover, Switch } from 'frappe-ui'
 
 const view=ref('mine'), rows=ref([]), issue=ref(null), people=ref([]), error=ref(''), busy=ref(false), page=ref(0), search=ref(''), filter=ref(''), showNew=ref(false), showLog=ref(false), showEdit=ref(false)
 const currentUser=ref(''), sidebarCollapsed=ref(false), pageLength=ref(20), detailsOpen=ref(true), attachmentsOpen=ref(true)
-const assignDraft=ref([]), assignError=ref(''), assignSaving=ref(false), assignContext=ref(0), assignOpen=ref(false), assignQuery=ref('')
+const assignDraft=ref([]), assignError=ref(''), assignSaving=ref(false), assignContext=ref(0), assignOpen=ref(false), assignQuery=ref(''), assignSearchOpen=ref(false)
+let assignSavePromise=null
 const showResolve=ref(false), resolutionNote=ref(''), resolveError=ref('')
 const timelineCategories=['Comments','Communications','Notes','Activity']
 const timelineSelection=ref(new Set(timelineCategories))
@@ -17,7 +18,7 @@ const richMenu=[['Paragraph','Heading 2','Heading 3','Heading 4'],'Separator','B
 const commentBody=ref(''), commentError=ref(''), commentEditorKey=ref(0)
 const commentEditor=ref(null), replyEditor=ref(null)
 const replyRoot=ref(null), replyBody=ref(''), replyError=ref(''), replyEditorKey=ref(0), replyWindowSizes=ref({})
-watch(() => issue.value?.name, () => { commentBody.value=''; commentError.value=''; commentEditorKey.value++; replyRoot.value=null; replyBody.value=''; replyError.value=''; replyEditorKey.value++; replyWindowSizes.value={}; timelineSelection.value=new Set(timelineCategories); for(const key of Object.keys(pendingImages)) delete pendingImages[key]; pendingImageTargets.clear(); inlineField.value=''; inlineValue.value=''; inlineError.value=''; inlineDeferred.value=false; inlineOverlay=false; inlineSaveAgain=false;assignContext.value++;assignDraft.value=[];assignError.value='';assignOpen.value=false;assignQuery.value='';showResolve.value=false;resolutionNote.value='';resolveError.value='' }, {flush:'sync'})
+watch(() => issue.value?.name, () => { commentBody.value=''; commentError.value=''; commentEditorKey.value++; replyRoot.value=null; replyBody.value=''; replyError.value=''; replyEditorKey.value++; replyWindowSizes.value={}; timelineSelection.value=new Set(timelineCategories); for(const key of Object.keys(pendingImages)) delete pendingImages[key]; pendingImageTargets.clear(); inlineField.value=''; inlineValue.value=''; inlineError.value=''; inlineDeferred.value=false; inlineOverlay=false; inlineSaveAgain=false;assignContext.value++;assignDraft.value=participantsFor(issue.value);assignError.value='';assignOpen.value=false;assignQuery.value='';assignSearchOpen.value=false;showResolve.value=false;resolutionNote.value='';resolveError.value='' }, {flush:'sync'})
 const blank=()=>({title:'',description:'',accountable_owner:'',coordination_user:'',next_action:'',next_action_date:'',participants:[],follow_up_assignees:[]})
 const form=reactive(blank()), edit=reactive({}), log=reactive({channel:'Internal Note',happened_at:'',contact:'',body:'',next_action:'',next_action_date:'',resolution_note:''})
 const columns = [{label:'Issue ID',key:'issue_id',width:'1.3fr'},{label:'Issue',key:'title',width:'3fr'},{label:'Status',key:'status',width:'1.5fr'},{label:'Issue Owner',key:'accountable_owner',width:'2fr'},{label:'Next action date',key:'next_action_date',width:'1.5fr'}]
@@ -62,7 +63,7 @@ async function api(method, data={}, post=false){
 async function run(fn){busy.value=true; error.value=''; try{await fn()}catch(e){error.value=e.message}finally{busy.value=false}}
 async function load(){await run(async()=>{rows.value=await api('list_issues',{view:view.value,status:filter.value,search:search.value,start:page.value*pageLength.value,page_length:pageLength.value})})}
 function setPageLength(value){pageLength.value=value;page.value=0;load()}
-async function canLeaveInline(){if(inlineDeferred.value || hasPendingImages.value)return false;const name=issue.value?.name;if(inlineSavePromise && !await inlineSavePromise)return false;if(issue.value?.name!==name)return false;return !inlineField.value || inlineValue.value===(issue.value?.[inlineField.value]||'') || window.confirm('Discard your unsaved issue edit?')}
+async function canLeaveInline(){if(assignSavePromise && !await assignSavePromise)return false;if(assignmentDirty.value)return false;if(inlineDeferred.value || hasPendingImages.value)return false;const name=issue.value?.name;if(inlineSavePromise && !await inlineSavePromise)return false;if(issue.value?.name!==name)return false;return !inlineField.value || inlineValue.value===(issue.value?.[inlineField.value]||'') || window.confirm('Discard your unsaved issue edit?')}
 async function open(name,push=true,skipGuard=false){if(!skipGuard && issue.value?.name!==name && !await canLeaveInline())return;await run(async()=>{issue.value=await api('get_issue',{name}); if(push) history.pushState({},'', '/unicom/'+encodeURIComponent(name))})}
 async function goList(v){if(!await canLeaveInline())return;view.value=v;issue.value=null;page.value=0;history.pushState({},'','/unicom');load()}
 function resetForm(){Object.assign(form,blank())}
@@ -112,26 +113,46 @@ function inlineInteraction(event){
 }
 function onInlineFocusOut(){setTimeout(()=>{const active=document.activeElement;if(active && active!==document.body && active!==document.documentElement)inlineInteraction({target:active})},0)}
 function setInlineEditor(component){inlineEditor.value=component;labelEditor(component,inlineEditor,'description-editor-label')}
-async function editIssue(){if(inlineField.value && !await saveInline())return false;Object.assign(edit,{title:issue.value.title,description:issue.value.description||'',accountable_owner:issue.value.accountable_owner,coordination_user:issue.value.coordination_user||'',status:issue.value.status,next_action:issue.value.next_action||'',next_action_date:issue.value.next_action_date||'',resolution_note:issue.value.resolution_note||'',participants:issue.value.access.filter(x=>x.reason==='Participant').map(x=>x.user),follow_up_assignees:issue.value.access.filter(x=>x.reason==='Follow-up').map(x=>x.user)});showEdit.value=true;return true}
+async function editIssue(){if(assignSavePromise && !await assignSavePromise)return false;if(assignmentDirty.value)return false;if(inlineField.value && !await saveInline())return false;Object.assign(edit,{title:issue.value.title,description:issue.value.description||'',accountable_owner:issue.value.accountable_owner,coordination_user:issue.value.coordination_user||'',status:issue.value.status,next_action:issue.value.next_action||'',next_action_date:issue.value.next_action_date||'',resolution_note:issue.value.resolution_note||'',participants:issue.value.access.filter(x=>x.reason==='Participant').map(x=>x.user),follow_up_assignees:issue.value.access.filter(x=>x.reason==='Follow-up').map(x=>x.user)});showEdit.value=true;return true}
+watch(issue,doc=>{if(!assignSaving.value && !assignError.value)assignDraft.value=participantsFor(doc)},{flush:'sync'})
+function participantsFor(doc){return [...new Set((doc?.access||[]).filter(row=>row.reason==='Participant' && row.user).map(row=>row.user))]}
+function sameParticipants(a,b){return a.length===b.length && a.every(user=>b.includes(user))}
+const assignmentDirty=computed(()=>!sameParticipants(assignDraft.value,participantsFor(issue.value)))
 async function openAssignments(togglePopover){
   if(assignOpen.value){togglePopover(false);return}
   const name=issue.value?.name
   if(inlineField.value && !await saveInline())return
-  if(!issue.value || issue.value.name!==name || busy.value)return
-  assignDraft.value=[...new Set(issue.value.access.filter(x=>x.reason==='Participant' && x.user).map(x=>x.user))]
-  assignError.value='';assignQuery.value='';togglePopover(true)
+  if(!issue.value || issue.value.name!==name || (busy.value && !assignSaving.value))return
+  assignQuery.value='';assignSearchOpen.value=false;togglePopover(true)
 }
-function toggleAssignment(user){if(assignSaving.value)return;assignDraft.value=assignDraft.value.includes(user)?assignDraft.value.filter(value=>value!==user):[...assignDraft.value,user]}
-function toggleAssignMe(){if(!currentUser.value || currentUser.value==='Guest' || assignSaving.value)return;assignDraft.value=assignDraft.value.includes(currentUser.value)?assignDraft.value.filter(user=>user!==currentUser.value):[...assignDraft.value,currentUser.value]}
-async function applyAssignments(close){
-  if(busy.value || assignSaving.value || !issue.value)return
-  const name=issue.value.name, context=assignContext.value, participants=[...assignDraft.value]
-  const existing=[...new Set(issue.value.access.filter(x=>x.reason==='Participant' && x.user).map(x=>x.user))]
-  if(participants.length===existing.length && participants.every(user=>existing.includes(user))){close();return}
+function setAssignment(users){
+  assignDraft.value=[...new Set(users)]
+  assignError.value=''
+  saveAssignments()
+}
+function toggleAssignment(user){setAssignment(assignDraft.value.includes(user)?assignDraft.value.filter(value=>value!==user):[...assignDraft.value,user])}
+function toggleAssignMe(){if(currentUser.value && currentUser.value!=='Guest')toggleAssignment(currentUser.value)}
+async function saveAssignments(){
+  if(assignSavePromise)return assignSavePromise
+  if(!issue.value)return false
+  if(!assignmentDirty.value){assignError.value='';return true}
+  if(busy.value && !assignSaving.value){assignError.value='Please wait and retry.';return false}
+  const name=issue.value.name,context=assignContext.value
   assignSaving.value=true;busy.value=true;assignError.value=''
-  try{const updated=await api('update_issue',{name,values:{participants}},true);if(issue.value?.name===name && assignContext.value===context){issue.value=updated;close()}}
-  catch(e){if(issue.value?.name===name && assignContext.value===context)assignError.value=e.message}
-  finally{assignSaving.value=false;busy.value=false}
+  assignSavePromise=(async()=>{
+    try{
+      while(issue.value?.name===name && assignContext.value===context){
+        const participants=[...assignDraft.value]
+        if(sameParticipants(participants,participantsFor(issue.value)))return true
+        const updated=await api('update_issue',{name,values:{participants}},true)
+        if(issue.value?.name!==name || assignContext.value!==context)return false
+        issue.value=updated
+      }
+      return false
+    }catch(e){if(issue.value?.name===name && assignContext.value===context)assignError.value=e.message;return false}
+    finally{assignSaving.value=false;busy.value=false;assignSavePromise=null}
+  })()
+  return assignSavePromise
 }
 async function resolveIssue(){
   if(busy.value || !issue.value)return
@@ -156,7 +177,7 @@ async function changeStatus(status){
   await run(async()=>{const updated=await api('update_issue',{name,values:{status}},true);if(issue.value?.name===name)issue.value=updated})
 }
 async function saveEdit(){await run(async()=>{issue.value=await api('update_issue',{name:issue.value.name,values:edit},true);showEdit.value=false})}
-async function logIssue(){if(inlineField.value && !await saveInline())return;Object.assign(log,{channel:'Internal Note',happened_at:new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16),contact:'',body:'',next_action:issue.value.next_action||'',next_action_date:issue.value.next_action_date||'',resolution_note:''});showLog.value=true}
+async function logIssue(){if(assignSavePromise && !await assignSavePromise)return;if(assignmentDirty.value)return;if(inlineField.value && !await saveInline())return;Object.assign(log,{channel:'Internal Note',happened_at:new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16),contact:'',body:'',next_action:issue.value.next_action||'',next_action_date:issue.value.next_action_date||'',resolution_note:''});showLog.value=true}
 async function saveLog(){await run(async()=>{const dom=new DOMParser().parseFromString(log.body,'text/html'); const mentions=[...dom.querySelectorAll('[data-type="mention"][data-id]')].map(x=>x.getAttribute('data-id'));issue.value=await api('log_communication',{name:issue.value.name,...log,mentions},true);showLog.value=false})}
 function submitShortcut(event,root=null){
   if(event.key!=='Enter' || !(event.metaKey || event.ctrlKey) || event.isComposing || event.keyCode===229)return
@@ -259,7 +280,7 @@ onMounted(async()=>{document.addEventListener('pointerdown',inlineInteraction,tr
     </div>
   </aside>
   <main class="min-w-0 min-h-0 flex-1 flex flex-col">
-    <header class="border-b border-gray-200 h-12 shrink-0 px-4 sm:px-6 flex items-center justify-between gap-2"><div class="min-w-0 flex-1 overflow-hidden"><Breadcrumbs class="unicom-breadcrumbs" :items="issue ? [{label:'Issues',onClick:()=>goList(view)},{label:'List',kind:'list',onClick:()=>goList(view)},{label:issue.title}] : [{label:'Issues',onClick:()=>goList(view)},{label:'List',kind:'list',onClick:()=>goList(view)}]"><template #prefix="{item}"><FeatherIcon v-if="item.kind==='list'" name="menu" class="h-4 w-4 mr-1 text-gray-600"/></template></Breadcrumbs></div><div class="flex shrink-0 items-center gap-2"><Popover v-if="issue" v-model:show="assignOpen" placement="bottom-end"><template #target="{togglePopover}"><Button :disabled="busy &amp;&amp; !inlineSaving" icon-left="user-plus" title="Assign To" @click="openAssignments(togglePopover)"><span class="hidden sm:inline">Assign To</span><span v-if="issue.access.some(x=>x.reason==='Participant')" class="ml-1">{{new Set(issue.access.filter(x=>x.reason==='Participant' &amp;&amp; x.user).map(x=>x.user)).size}}</span></Button></template><template #body="{togglePopover}"><div class="mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 bg-white p-2 shadow-lg" :class="assignSaving ? 'pointer-events-none opacity-60' : ''"><FormControl v-model="assignQuery" placeholder="Search users" aria-label="Search users"/><div class="mt-2 max-h-52 overflow-y-auto"><Button v-for="option in filteredAssignmentOptions" :key="option.value" variant="ghost" class="w-full !justify-start" :aria-pressed="assignDraft.includes(option.value)" @click="toggleAssignment(option.value)"><template #prefix><FeatherIcon v-if="assignDraft.includes(option.value)" name="check" class="h-4 w-4"/><span v-else class="h-4 w-4"/></template><span class="truncate">{{option.label}}</span></Button><div v-if="!filteredAssignmentOptions.length" class="p-2 text-sm text-gray-500">No users found</div></div><div class="mt-2 border-t border-gray-200 pt-2 space-y-2"><div class="text-xs text-gray-600">Selected: {{assignDraft.length ? assignDraft.map(user=>authorName(user)).join(', ') : 'None'}}</div><p v-if="assignDraft.some(user=>user!==currentUser &amp;&amp; !people.some(person=>person.name===user))" class="text-xs text-gray-600">If an unavailable participant prevents saving, remove them before applying changes.</p><ErrorMessage :message="safeAssignError"/><div class="flex flex-wrap items-center gap-2"><Button size="sm" :disabled="assignSaving || !currentUser || currentUser==='Guest'" @click="toggleAssignMe">{{assignDraft.includes(currentUser) ? 'Remove me' : 'Assign to me'}}</Button><Button size="sm" :disabled="assignSaving" @click="togglePopover(false)">Cancel</Button><Button size="sm" variant="solid" :loading="assignSaving" :disabled="assignSaving" @click="applyAssignments(()=>togglePopover(false))">Apply</Button></div></div></div></template></Popover><Dropdown v-if="issue" :options="statuses.map(status=>({label:status,onClick:()=>changeStatus(status)}))"><Button :disabled="busy &amp;&amp; !inlineSaving" class="whitespace-nowrap" :title="'Status: '+issue.status"><template #prefix><span :class="statusColor(issue.status)" class="h-2 w-2 rounded-full" aria-hidden="true"/></template>{{issue.status}}<span v-if="issue.overdue" class="ml-1 text-red-600">· Overdue</span><template #suffix><FeatherIcon name="chevron-down" class="h-4 w-4"/></template></Button></Dropdown><Button variant="solid" icon-left="plus" class="shrink-0 whitespace-nowrap" @click="showNew=true">Create</Button></div></header>
+    <header class="border-b border-gray-200 h-12 shrink-0 px-4 sm:px-6 flex items-center justify-between gap-2"><div class="min-w-0 flex-1 overflow-hidden"><Breadcrumbs class="unicom-breadcrumbs" :items="issue ? [{label:'Issues',onClick:()=>goList(view)},{label:'List',kind:'list',onClick:()=>goList(view)},{label:issue.title}] : [{label:'Issues',onClick:()=>goList(view)},{label:'List',kind:'list',onClick:()=>goList(view)}]"><template #prefix="{item}"><FeatherIcon v-if="item.kind==='list'" name="menu" class="h-4 w-4 mr-1 text-gray-600"/></template></Breadcrumbs></div><div class="flex shrink-0 items-center gap-2"><Popover v-if="issue" v-model:show="assignOpen" placement="bottom-end"><template #target="{togglePopover}"><Button :disabled="busy &amp;&amp; !inlineSaving &amp;&amp; !assignSaving" :title="assignError ? 'Assign To: unsaved changes' : 'Assign To'" @click="openAssignments(togglePopover)"><span v-if="!assignDraft.length" class="flex items-center gap-1"><FeatherIcon name="user-plus" class="h-4 w-4"/><span class="hidden sm:inline">Assign To</span></span><span v-else-if="assignDraft.length===1" class="flex items-center gap-2"><Avatar :key="assignDraft[0]+userImage(assignDraft[0])" size="sm" :label="authorName(assignDraft[0])" :image="userImage(assignDraft[0])"/><span class="hidden max-w-32 truncate sm:inline">{{authorName(assignDraft[0])}}</span></span><span v-else class="flex items-center"><span class="flex -space-x-2"><Avatar v-for="user in assignDraft.slice(0,3)" :key="user+userImage(user)" size="sm" class="ring-2 ring-white" :label="authorName(user)" :image="userImage(user)"/></span><span v-if="assignDraft.length>3" class="ml-1 text-xs">+{{assignDraft.length-3}}</span></span><span v-if="assignError" class="ml-1 text-red-600" aria-label="Unsaved assignment changes">!</span></Button></template><template #body><div class="mt-1 w-[360px] max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 bg-white p-3 shadow-lg"><div class="mb-2 text-base text-gray-600">Assign To</div><Popover v-model:show="assignSearchOpen" placement="bottom-start"><template #target="{togglePopover}"><div role="button" tabindex="0" aria-label="Choose participants" class="flex min-h-12 flex-wrap items-start gap-1 rounded-lg bg-gray-100 p-2" @click="togglePopover()" @keydown.enter.self.prevent="togglePopover()" @keydown.space.self.prevent="togglePopover()"><span v-for="user in assignDraft" :key="user" class="inline-flex max-w-full items-center gap-1 rounded-full border border-gray-200 bg-white px-1 py-0.5"><Avatar :key="user+userImage(user)" size="xs" :label="authorName(user)" :image="userImage(user)"/><span class="max-w-36 truncate text-base text-gray-700">{{authorName(user)}}<span v-if="user!==currentUser &amp;&amp; !people.some(person=>person.name===user)"> (unavailable)</span></span><Button size="sm" variant="ghost" icon="x" :label="'Remove '+authorName(user)" :title="'Remove '+authorName(user)" @click.stop="toggleAssignment(user)"/></span><span v-if="!assignDraft.length" class="text-base text-gray-500">Choose people</span></div></template><template #body><div class="mt-1 w-56 max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 bg-white p-2 shadow-lg"><FormControl v-model="assignQuery" placeholder="Search" aria-label="Search users"/><div class="mt-2 max-h-52 overflow-y-auto"><Button v-for="option in filteredAssignmentOptions" :key="option.value" variant="ghost" class="w-full !justify-start" :aria-pressed="assignDraft.includes(option.value)" @click="toggleAssignment(option.value)"><template #prefix><Avatar :key="option.value+userImage(option.value)" size="sm" :label="authorName(option.value)" :image="userImage(option.value)"/></template><span class="truncate">{{option.label}}</span><template #suffix><FeatherIcon v-if="assignDraft.includes(option.value)" name="check" class="h-4 w-4"/></template></Button><div v-if="!filteredAssignmentOptions.length" class="p-2 text-sm text-gray-500">No users found</div></div><Button variant="ghost" icon-left="x" class="mt-2 w-full !justify-start border-t" @click="setAssignment([])">Clear</Button></div></template></Popover><div class="mt-2"><Switch label="Assign To Me" :model-value="assignDraft.includes(currentUser)" :disabled="!currentUser || currentUser==='Guest'" @update:model-value="toggleAssignMe"/></div><p v-if="assignDraft.some(user=>user!==currentUser &amp;&amp; !people.some(person=>person.name===user))" class="mt-2 text-xs text-gray-600">If an unavailable participant prevents saving, remove them.</p><div v-if="assignSaving" role="status" class="mt-2 text-xs text-gray-500">Saving assignments…</div><div v-if="assignError" class="mt-2"><ErrorMessage :message="safeAssignError"/><Button size="sm" class="mt-1" @click="saveAssignments">Retry</Button></div></div></template></Popover><Dropdown v-if="issue" :options="statuses.map(status=>({label:status,onClick:()=>changeStatus(status)}))"><Button :disabled="busy &amp;&amp; !inlineSaving" class="whitespace-nowrap" :title="'Status: '+issue.status"><template #prefix><span :class="statusColor(issue.status)" class="h-2 w-2 rounded-full" aria-hidden="true"/></template>{{issue.status}}<span v-if="issue.overdue" class="ml-1 text-red-600">· Overdue</span><template #suffix><FeatherIcon name="chevron-down" class="h-4 w-4"/></template></Button></Dropdown><Button variant="solid" icon-left="plus" class="shrink-0 whitespace-nowrap" @click="showNew=true">Create</Button></div></header>
     <ErrorMessage v-if="error" class="mx-6 mt-4" :message="safeError"/>
     <template v-if="!issue">
       <div class="min-h-0 flex-1 flex flex-col">
