@@ -14,6 +14,8 @@ body { margin: 0; font-family: InterVar, ui-sans-serif, system-ui, sans-serif; -
 .unicom-breadcrumbs button > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Place the installed fixed menu below the editor. */
-.rich-editor { @apply border border-gray-200 rounded-lg; display: flex; flex-direction: column; min-width: 0; }
+.rich-editor { @apply border border-gray-200 rounded-lg; display: grid; grid-template-columns: auto minmax(0, 1fr); min-width: 0; }
 .rich-editor .ProseMirror { width: 100%; max-width: none; border: 0; border-radius: 0; box-shadow: none; }
-.rich-editor > .inline-flex { @apply border-0 border-t border-gray-200 rounded-none; order: 1; width: 100%; }
+.rich-editor > :not(.inline-flex):not(.editor-image-action) { grid-column: 1 / -1; }
+.rich-editor > .inline-flex { @apply border-0 border-t border-gray-200 rounded-none; grid-row: 2; grid-column: 2; min-width: 0; width: 100%; }
+.rich-editor > .editor-image-action { @apply border-t border-gray-200; grid-row: 2; grid-column: 1; display: flex; align-items: center; padding-left: .25rem; }
