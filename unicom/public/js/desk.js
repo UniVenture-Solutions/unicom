@@ -138,3 +138,50 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true })
   else mount()
 })()
+
+/* Add a source-linked issue from any saved Desk form. Server validation is authoritative. */
+;(() => {
+  if (!window.frappe || !window.jQuery) return
+  $(document).on('form-refresh.unicom', (_event, frm) => {
+    if (!frm.doc || !frm.meta || frm.is_new() || frm.meta.istable || frm.meta.issingle || frm.doctype.startsWith('UniCom ')) return
+    const source = { reference_doctype: frm.doctype, reference_name: frm.doc.name }
+    frm.add_custom_button(__('Create issue'), () => {
+      let saving = false
+      const dialog = new frappe.ui.Dialog({
+        title: __('Create UniCom issue'),
+        fields: [
+          { fieldname: 'title', label: __('Title'), fieldtype: 'Data', reqd: 1 },
+          { fieldname: 'description', label: __('Description'), fieldtype: 'Small Text' },
+          { fieldname: 'accountable_owner', label: __('Issue Owner'), fieldtype: 'Link', options: 'User', reqd: 1, default: frappe.session.user, get_query: () => ({ filters: { enabled: 1 } }) },
+          { fieldname: 'coordination_user', label: __('Coordinating with'), fieldtype: 'Link', options: 'User', get_query: () => ({ filters: { enabled: 1, user_type: 'System User' } }) },
+          { fieldname: 'participants', label: __('Participants'), fieldtype: 'MultiSelectList', get_data: async text => {
+            const response = await frappe.call({ method: 'unicom.api.users', args: { query: text || '' } })
+            return (response.message || []).map(user => ({ value: user.name, label: frappe.utils.escape_html(user.full_name || user.name), description: frappe.utils.escape_html(user.name) }))
+          } },
+          { fieldname: 'next_action', label: __('Next action'), fieldtype: 'Small Text', reqd: 1 },
+          { fieldname: 'next_action_date', label: __('Next action date'), fieldtype: 'Date', reqd: 1 }
+        ],
+        primary_action_label: __('Create issue'),
+        primary_action: async values => {
+          if (saving) return
+          saving = true
+          dialog.disable_primary_action()
+          try {
+            const result = await frappe.call({ method: 'unicom.api.create_issue', type: 'POST', args: { ...values, ...source, participants: JSON.stringify(values.participants || []) } })
+            const issue = result.message
+            if (!issue || !issue.name) throw new Error('Missing issue')
+            dialog.hide()
+            const url = '/unicom/' + encodeURIComponent(issue.name)
+            frappe.msgprint({ title: __('Issue created'), message: `<a href="${url}">${__('Open issue')}</a>` })
+          } catch (_) {
+            frappe.show_alert({ message: __('Unable to create issue. Please check the fields and try again.'), indicator: 'red' })
+          } finally {
+            saving = false
+            dialog.enable_primary_action()
+          }
+        }
+      })
+      dialog.show()
+    })
+  })
+})()

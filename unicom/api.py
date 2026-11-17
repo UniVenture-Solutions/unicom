@@ -145,8 +145,33 @@ def _doc(name, lock=False):
     return doc
 
 
+def _source_document(doctype, name):
+    """Return a currently readable supported source, or None without disclosing details."""
+    if not isinstance(doctype, str) or not isinstance(name, str) or not doctype or not name:
+        return None
+    if doctype.startswith('UniCom ') or not frappe.db.exists('DocType', doctype):
+        return None
+    meta = frappe.get_meta(doctype)
+    if meta.istable or meta.issingle or not frappe.db.exists(doctype, name):
+        return None
+    source = frappe.get_doc(doctype, name)
+    return source if frappe.has_permission(doctype, ptype='read', doc=source) else None
+
+
+def _source_pair(doctype, name):
+    if doctype is None and name is None:
+        return None, None
+    if not _source_document(doctype, name):
+        frappe.throw(_('Invalid or inaccessible source document'), frappe.PermissionError)
+    return doctype, name
+
+
 def _output(doc):
     result = doc.as_dict()
+    source_doctype = result.pop('reference_doctype', None)
+    source_name = result.pop('reference_name', None)
+    if _source_document(source_doctype, source_name):
+        result.update(reference_doctype=source_doctype, reference_name=source_name)
     result['overdue'] = bool(doc.status != 'Resolved' and doc.next_action_date and getdate(doc.next_action_date) < getdate(today()))
     result['attachments'] = [{'name': row.name, 'file_name': row.file_name, 'file_url': '/api/method/unicom.api.download_attachment?' + urlencode({'name': doc.name, 'attachment': row.name}), 'creation': row.uploaded_at} for row in doc.attachments]
     profile_users = {doc.owner, doc.accountable_owner, getattr(doc, 'coordination_user', None)}
@@ -195,10 +220,11 @@ def get_issue(name):
 
 
 @frappe.whitelist(methods=['POST'])
-def create_issue(title, accountable_owner, next_action, next_action_date, description='', participants=None, follow_up_assignees=None, coordination_user=None):
+def create_issue(title, accountable_owner, next_action, next_action_date, description='', participants=None, follow_up_assignees=None, coordination_user=None, reference_doctype=None, reference_name=None):
     _user()
+    reference_doctype, reference_name = _source_pair(reference_doctype, reference_name)
     doc = frappe.new_doc('UniCom Issue')
-    doc.update({'title': title, 'description': _rich_html(description or ''), 'accountable_owner': accountable_owner, 'coordination_user': _coordination_selection(coordination_user), 'status': 'Open', 'next_action': next_action, 'next_action_date': next_action_date})
+    doc.update({'reference_doctype': reference_doctype, 'reference_name': reference_name, 'title': title, 'description': _rich_html(description or ''), 'accountable_owner': accountable_owner, 'coordination_user': _coordination_selection(coordination_user), 'status': 'Open', 'next_action': next_action, 'next_action_date': next_action_date})
     _set_users(doc, 'Participant', participants)
     _set_users(doc, 'Follow-up', follow_up_assignees)
     _validate(doc)

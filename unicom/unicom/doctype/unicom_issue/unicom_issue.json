@@ -9,6 +9,8 @@
     "description",
     "accountable_owner",
     "coordination_user",
+    "reference_doctype",
+    "reference_name",
     "status",
     "next_action",
     "next_action_date",
@@ -94,6 +96,20 @@
       "label": "Attachments",
       "fieldtype": "Table",
       "options": "UniCom Issue Attachment"
+    },
+    {
+      "fieldname": "reference_doctype",
+      "label": "Source DocType",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "permlevel": 1
+    },
+    {
+      "fieldname": "reference_name",
+      "label": "Source Document",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "permlevel": 1
     }
   ],
   "autoname": "hash",
