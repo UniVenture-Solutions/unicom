@@ -4,6 +4,9 @@
 @tailwind components;
 @tailwind utilities;
 @font-face { font-family: 'InterVar'; src: url('../node_modules/frappe-ui/src/fonts/Inter/Inter.var.woff2') format('woff2'); font-style: normal; font-weight: 100 900; font-display: swap; }
+html, body, #app { height: 100%; }
+html, body { overflow: hidden; }
+#app { position: relative; overflow: hidden; min-height: 0; }
 body { margin: 0; font-family: InterVar, ui-sans-serif, system-ui, sans-serif; -webkit-font-smoothing: antialiased; color: #171717; background: #fff; }
 .ProseMirror { min-height: 100px; padding: .75rem; border: 1px solid #e5e7eb; border-radius: .375rem; outline: none; }
 
