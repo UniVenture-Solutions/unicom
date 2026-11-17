@@ -145,7 +145,9 @@
   $(document).on('form-refresh.unicom', (_event, frm) => {
     if (!frm.doc || !frm.meta || frm.is_new() || frm.meta.istable || frm.meta.issingle || frm.doctype.startsWith('UniCom ')) return
     const source = { reference_doctype: frm.doctype, reference_name: frm.doc.name }
-    frm.add_custom_button(__('Create issue'), () => {
+    const lookup = frm.__unicomReferenceLookup = (frm.__unicomReferenceLookup || 0) + 1
+    const stillCurrent = () => frm.__unicomReferenceLookup === lookup && (!window.cur_frm || window.cur_frm === frm) && frm.doc?.name === source.reference_name && frm.doctype === source.reference_doctype && !frm.is_new()
+    const addCreateButton = () => frm.add_custom_button(__('Create issue'), () => {
       let saving = false
       const dialog = new frappe.ui.Dialog({
         title: __('Create UniCom issue'),
@@ -171,6 +173,11 @@
             if (!issue || !issue.name) throw new Error('Missing issue')
             dialog.hide()
             const url = '/unicom/' + encodeURIComponent(issue.name)
+            if (stillCurrent()) {
+              frm.__unicomReferenceLookup++
+              frm.remove_custom_button(__('Create issue'))
+              frm.add_custom_button(__('Open issue'), () => { window.location.href = url })
+            }
             frappe.msgprint({ title: __('Issue created'), message: `<a href="${url}">${__('Open issue')}</a>` })
           } catch (_) {
             frappe.show_alert({ message: __('Unable to create issue. Please check the fields and try again.'), indicator: 'red' })
@@ -181,6 +188,20 @@
         }
       })
       dialog.show()
+    })
+    frappe.call({ method: 'unicom.api.source_issue', args: source }).then(response => {
+      if (!stillCurrent()) return
+      if (!response.message?.exists) { addCreateButton(); return }
+      if (response.message.name) {
+        frm.add_custom_button(__('Open issue'), () => { window.location.href = '/unicom/' + encodeURIComponent(response.message.name) })
+      } else {
+        const button = frm.add_custom_button(__('Active issue exists'), () => {})
+        button.prop('disabled', true)
+      }
+    }).catch(() => {
+      if (!stillCurrent()) return
+      const button = frm.add_custom_button(__('Issue status unavailable'), () => {})
+      button.prop('disabled', true)
     })
   })
 })()

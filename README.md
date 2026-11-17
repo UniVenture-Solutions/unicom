@@ -17,3 +17,5 @@ Issues have an immutable public `ISU-####` ID, allocated from the `ISU-` naming 
 Desk loads a UniCom launcher from the app's standard `/assets/unicom/` files. It lists only issues returned by the existing permission-filtered API and links to the UniCom app. The panel supports search, views, refresh and incremental loading; it does not post messages.
 
 The standard Desktop Icon record opens `/unicom`. On a site where UniCom was installed before this record was added, import only `unicom/desktop_icon/unicom.json` and clear the affected Desk boot/icon caches as part of deployment. Check for an existing icon with that name before importing. Frappe's saved per-user desktop layouts may need the user to add the icon; do not overwrite those layouts.
+
+A source document can have one active issue at a time. Users who can read the source but cannot access its issue see only that an active issue exists. Resolving the issue permits a new one; reopening is rejected while another active issue exists.

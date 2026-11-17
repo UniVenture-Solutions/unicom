@@ -134,10 +134,8 @@ def _event(doc, kind, before=None, **kwargs):
 
 def _doc(name, lock=False):
     _user()
-    if lock:
-        # Serialize updates before fetching, preserving timeline and current action under concurrency.
-        frappe.db.sql('SELECT name FROM `tabUniCom Issue` WHERE name=%s FOR UPDATE', name)
-    doc = frappe.get_doc('UniCom Issue', name)
+    # A locking fetch is also a current read under MariaDB REPEATABLE READ.
+    doc = frappe.get_doc('UniCom Issue', name, for_update=True) if lock else frappe.get_doc('UniCom Issue', name)
     if not issue_permission(doc, user=frappe.session.user, ptype='read'):
         frappe.throw(_('Not permitted'), frappe.PermissionError)
     return doc
@@ -147,7 +145,7 @@ def _source_document(doctype, name):
     """Return a currently readable supported source, or None without disclosing details."""
     if not isinstance(doctype, str) or not isinstance(name, str) or not doctype or not name:
         return None
-    if doctype.startswith('UniCom ') or not frappe.db.exists('DocType', doctype):
+    if doctype.startswith('UniCom ') or any(char in doctype for char in ('`', '\\')) or not frappe.db.exists('DocType', doctype):
         return None
     meta = frappe.get_meta(doctype)
     if meta.istable or meta.issingle or not frappe.db.exists(doctype, name):
@@ -162,6 +160,51 @@ def _source_pair(doctype, name):
     if not _source_document(doctype, name):
         frappe.throw(_('Invalid or inaccessible source document'), frappe.PermissionError)
     return doctype, name
+
+
+def _lock_source(doctype, name):
+    # Quote the validated DocType separately from the bound document name.
+    if not doctype or not name or any(char in doctype for char in ('`', '\\')) or not frappe.db.exists('DocType', doctype):
+        frappe.throw(_('Source document is no longer available'))
+    meta = frappe.get_meta(doctype)
+    if meta.istable or meta.issingle or doctype.startswith('UniCom '):
+        frappe.throw(_('Source document is no longer available'))
+    table = 'tab' + doctype.replace('`', '``')
+    if not frappe.db.sql(f'SELECT name FROM `{table}` WHERE name=%s FOR UPDATE', (name,)):
+        frappe.throw(_('Source document is no longer available'))
+
+
+def _active_source_issue(doctype, name, exclude=None, lock=False):
+    query = "SELECT name FROM `tabUniCom Issue` WHERE reference_doctype=%s AND reference_name=%s AND status != 'Resolved'"
+    args = [doctype, name]
+    if exclude:
+        query += ' AND name != %s'
+        args.append(exclude)
+    query += ' ORDER BY name LIMIT 1'
+    if lock:
+        query += ' FOR UPDATE'
+    rows = frappe.db.sql(query, tuple(args))
+    return rows[0][0] if rows else None
+
+
+def _ensure_no_active_source(doctype, name, exclude=None):
+    if _active_source_issue(doctype, name, exclude=exclude, lock=True):
+        frappe.throw(_('An active issue already exists for this source document'))
+
+
+@frappe.whitelist()
+def source_issue(reference_doctype, reference_name):
+    user = _user()
+    if not reference_doctype or not reference_name:
+        frappe.throw(_('Invalid or inaccessible source document'), frappe.PermissionError)
+    _source_pair(reference_doctype, reference_name)
+    name = _active_source_issue(reference_doctype, reference_name)
+    if not name:
+        return {'exists': False}
+    issue = frappe.get_doc('UniCom Issue', name)
+    if issue_permission(issue, user=user, ptype='read'):
+        return {'exists': True, 'name': name}
+    return {'exists': True}
 
 
 def _output(doc):
@@ -221,6 +264,9 @@ def get_issue(name):
 def create_issue(title, accountable_owner, next_action='', next_action_date=None, description='', participants=None, follow_up_assignees=None, coordination_user=None, reference_doctype=None, reference_name=None):
     _user()
     reference_doctype, reference_name = _source_pair(reference_doctype, reference_name)
+    if reference_doctype:
+        _lock_source(reference_doctype, reference_name)
+        _ensure_no_active_source(reference_doctype, reference_name)
     doc = frappe.new_doc('UniCom Issue')
     doc.update({'reference_doctype': reference_doctype, 'reference_name': reference_name, 'title': title, 'description': _rich_html(description or ''), 'accountable_owner': accountable_owner, 'coordination_user': _coordination_selection(coordination_user), 'status': 'Open', 'next_action': next_action, 'next_action_date': next_action_date})
     _set_users(doc, 'Participant', participants)
@@ -234,11 +280,20 @@ def create_issue(title, accountable_owner, next_action='', next_action_date=None
 
 @frappe.whitelist(methods=['POST'])
 def update_issue(name, values):
-    doc = _doc(name, lock=True)
-    before = _snapshot(doc)
     values = _json(values, {})
     if not isinstance(values, dict) or set(values) - {'title','description','accountable_owner','coordination_user','status','next_action','next_action_date','resolution_note','participants','follow_up_assignees'}:
         frappe.throw(_('Invalid fields'))
+    # The source pair is immutable. Lock it before the issue for active states.
+    source = None
+    if values.get('status') in ('Open', 'In Progress', 'Waiting'):
+        original = _doc(name)
+        if getattr(original, 'reference_doctype', None) and getattr(original, 'reference_name', None):
+            source = (original.reference_doctype, original.reference_name)
+            _lock_source(*source)
+    doc = _doc(name, lock=True)
+    if source:
+        _ensure_no_active_source(*source, exclude=name)
+    before = _snapshot(doc)
     for key, val in values.items():
         if key == 'participants': _set_users(doc, 'Participant', val)
         elif key == 'follow_up_assignees': _set_users(doc, 'Follow-up', val)
