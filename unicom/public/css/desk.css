@@ -1,0 +1,48 @@
+.unicom-desk-launcher {
+  position: fixed;
+  z-index: 1050;
+  right: 20px;
+  bottom: 88px;
+  border-radius: 999px;
+  box-shadow: var(--shadow-base);
+}
+.unicom-desk-panel {
+  position: fixed;
+  z-index: 1050;
+  right: 20px;
+  bottom: 138px;
+  display: flex;
+  flex-direction: column;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(520px, calc(100vh - 154px));
+  overflow: hidden;
+  background: var(--fg-color);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-lg, 12px);
+  box-shadow: var(--shadow-lg, 0 8px 28px rgba(0, 0, 0, .15));
+}
+.unicom-desk-panel[hidden], .unicom-desk-panel [hidden] { display: none !important; }
+.unicom-desk-header, .unicom-desk-footer, .unicom-desk-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+}
+.unicom-desk-header { border-bottom: 1px solid var(--border-color); }
+.unicom-desk-header strong, .unicom-desk-footer a { flex: 1; }
+.unicom-desk-filters input { min-width: 0; flex: 1; }
+.unicom-desk-filters select { width: 135px; }
+.unicom-desk-status { padding: 0 12px; color: var(--text-muted); }
+.unicom-desk-status:empty { display: none; }
+.unicom-desk-list { overflow-y: auto; min-height: 0; }
+.unicom-desk-issue { display: block; padding: 10px 12px; color: var(--text-color); border-top: 1px solid var(--border-color); }
+.unicom-desk-issue:hover { background: var(--bg-light-gray); color: var(--text-color); text-decoration: none; }
+.unicom-desk-title, .unicom-desk-meta { display: block; overflow-wrap: anywhere; }
+.unicom-desk-title { font-weight: 500; }
+.unicom-desk-meta { margin-top: 4px; color: var(--text-muted); font-size: 12px; }
+.unicom-desk-footer { border-top: 1px solid var(--border-color); }
+@media (max-width: 420px) {
+  .unicom-desk-panel { right: 12px; }
+  .unicom-desk-launcher { right: 12px; }
+}

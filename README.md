@@ -11,3 +11,9 @@ Focused local tests (with a Frappe environment on PYTHONPATH): `python -m unitte
 If the site proxy does not serve `/assets`, build with `UNICOM_ASSET_BASE=/files/unicom/frontend/ npm run build` from `frontend`, then run `node scripts/publish-site-assets.mjs /absolute/path/to/site` from `frontend`. This copies the compiled public JS and CSS under that site's `/files/unicom/frontend/assets/`; retain the generated website HTML from the same build. Run the helper again after each frontend build. The default build continues to use bench `/assets`.
 
 Issues have an immutable public `ISU-####` ID, allocated from the `ISU-` naming series; the original internal name remains the route and link identifier. The post-model-sync patch backfills existing issues in creation/name order and advances the series beyond existing valid IDs. Run the migration in maintenance mode after a backup. The patch stops on invalid, noncanonical, or duplicate existing IDs; investigate conflicts rather than resetting the series. Verify new allocations and existing links on the site after migration.
+
+### Desk issue panel
+
+Desk loads a UniCom launcher from the app's standard `/assets/unicom/` files. It lists only issues returned by the existing permission-filtered API and links to the UniCom app. The panel supports search, views, refresh and incremental loading; it does not post messages.
+
+The standard Desktop Icon record opens `/unicom`. On a site where UniCom was installed before this record was added, import only `unicom/desktop_icon/unicom.json` and clear the affected Desk boot/icon caches as part of deployment. Check for an existing icon with that name before importing. Frappe's saved per-user desktop layouts may need the user to add the icon; do not overwrite those layouts.

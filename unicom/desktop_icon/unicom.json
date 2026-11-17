@@ -1,0 +1,14 @@
+{
+  "app": "unicom",
+  "doctype": "Desktop Icon",
+  "hidden": 0,
+  "icon_type": "App",
+  "idx": 0,
+  "label": "UniCom",
+  "link": "/unicom",
+  "link_type": "External",
+  "logo_url": "",
+  "name": "UniCom",
+  "roles": [],
+  "standard": 1
+}

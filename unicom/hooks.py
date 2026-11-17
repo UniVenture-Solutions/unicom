@@ -8,3 +8,8 @@ app_license = "MIT"
 permission_query_conditions = {"UniCom Issue": "unicom.permissions.issue_query"}
 has_permission = {"UniCom Issue": "unicom.permissions.issue_permission"}
 website_route_rules = [{"from_route": "/unicom/<path:app_path>", "to_route": "unicom"}]
+
+# Desk integration uses the same permission-filtered issue API as the app.
+app_include_js = ['/assets/unicom/js/desk.js']
+app_include_css = ['/assets/unicom/css/desk.css']
+add_to_apps_screen = [{'name': 'unicom', 'title': 'UniCom', 'route': '/unicom', 'logo': ''}]
