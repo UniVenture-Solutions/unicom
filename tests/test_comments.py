@@ -118,10 +118,11 @@ class CommentTests(unittest.TestCase):
         self.assertEqual(self.doc.timeline[-2].reply_to, 'old')
         self.assertIsNone(self.doc.timeline[-1].reply_to)
 
-    def test_active_issue_still_requires_action(self):
+    def test_active_issue_allows_comment_without_action(self):
         self.doc.next_action = ''
-        with self.assertRaises(ValueError): api.add_comment('issue', '<p>Discussion</p>')
-        self.assertFalse(self.doc.saved)
+        self.doc.next_action_date = None
+        api.add_comment('issue', '<p>Discussion</p>')
+        self.assertTrue(self.doc.saved)
 
 
 if __name__ == '__main__': unittest.main()

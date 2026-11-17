@@ -104,8 +104,6 @@ def _validate(doc):
     if doc.status == 'Resolved':
         if not (doc.resolution_note or '').strip():
             frappe.throw(_('A resolution note is required'))
-    elif not (doc.next_action or '').strip() or not doc.next_action_date:
-        frappe.throw(_('An active issue needs a next action and date'))
     if doc.next_action_date:
         getdate(doc.next_action_date)
 
@@ -220,7 +218,7 @@ def get_issue(name):
 
 
 @frappe.whitelist(methods=['POST'])
-def create_issue(title, accountable_owner, next_action, next_action_date, description='', participants=None, follow_up_assignees=None, coordination_user=None, reference_doctype=None, reference_name=None):
+def create_issue(title, accountable_owner, next_action='', next_action_date=None, description='', participants=None, follow_up_assignees=None, coordination_user=None, reference_doctype=None, reference_name=None):
     _user()
     reference_doctype, reference_name = _source_pair(reference_doctype, reference_name)
     doc = frappe.new_doc('UniCom Issue')

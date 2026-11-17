@@ -10,6 +10,6 @@ has_permission = {"UniCom Issue": "unicom.permissions.issue_permission"}
 website_route_rules = [{"from_route": "/unicom/<path:app_path>", "to_route": "unicom"}]
 
 # Desk integration uses the same permission-filtered issue API as the app.
-app_include_js = ['/assets/unicom/js/desk.js?v=source-reference-1']
+app_include_js = ['/assets/unicom/js/desk.js?v=optional-action-1']
 app_include_css = ['/assets/unicom/css/desk.css?v=4effa3f']
 add_to_apps_screen = [{'name': 'unicom', 'title': 'UniCom', 'route': '/unicom', 'logo': '/assets/unicom/images/desk-chat.svg'}]

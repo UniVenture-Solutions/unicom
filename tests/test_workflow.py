@@ -23,18 +23,16 @@ class WorkflowTests(unittest.TestCase):
             api._set_users(doc, 'Participant', [])
         self.assertEqual([(r.user, r.reason) for r in doc.access], [('person', 'Mention')])
 
-    def test_active_requires_action_and_date_resolved_requires_note(self):
+    def test_action_optional_and_resolution_note_still_required(self):
         doc = Doc(title='Issue', accountable_owner='owner', status='Open', next_action='', next_action_date=None, resolution_note='')
         def throw(message, *args): raise ValueError(message)
         with patch.object(api, '_users'), patch.object(frappe, 'throw', side_effect=throw):
-            with self.assertRaises(ValueError): api._validate(doc)
-            doc.next_action = 'Call'; doc.next_action_date = '2026-11-17'
             api._validate(doc)
+            doc.status = 'In Progress'; api._validate(doc)
             doc.status = 'Resolved'
             with self.assertRaises(ValueError): api._validate(doc)
             doc.resolution_note = 'Finished'; api._validate(doc)
-            doc.status = 'Open'; doc.next_action = ''
-            with self.assertRaises(ValueError): api._validate(doc)
+            doc.status = 'Open'; api._validate(doc)
 
     def test_revoked_uploader_cannot_download_using_old_url(self):
         issue = Doc(owner='creator', accountable_owner='owner', access=[], attachments=[Doc(name='file1', storage_key='a'*64, file_name='secret')])

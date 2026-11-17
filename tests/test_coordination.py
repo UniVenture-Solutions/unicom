@@ -41,6 +41,17 @@ class CoordinationTests(unittest.TestCase):
         api.create_issue('Issue','owner','Call','2026-11-20')
         self.assertIsNone(self.doc.coordination_user)
 
+    def test_create_without_next_action_and_subsequent_updates(self):
+        api.create_issue('Issue', 'owner')
+        self.assertEqual(self.doc.next_action, '')
+        self.assertIsNone(self.doc.next_action_date)
+        api.update_issue('issue', {'title': 'Changed'})
+        api.add_comment('issue', '<p>Discussion</p>')
+        api.log_communication('issue', 'Call', '2026-11-16 12:00:00', '<p>Called</p>')
+        api.update_issue('issue', {'status': 'In Progress'})
+        with self.assertRaises(ValueError):
+            api.update_issue('issue', {'status': 'Resolved'})
+
     def test_create_rejects_disabled_coordinator(self):
         with self.assertRaises(ValueError):
             api.create_issue('Issue', 'owner', 'Call', '2026-11-20', coordination_user='disabled')

@@ -1,6 +1,6 @@
 # UniCom
 
-UniCom is a standalone Frappe app for coordinating issues and their next actions. An issue has one accountable owner; participants and follow-up assignees are separate. A communication may mention users, granting them continuing access to the issue history. Mentions, participants, and assignees grant access; creator and owner also have access. Every active issue needs a next action and date, and resolving requires a resolution note. Overdue is calculated against the site date.
+UniCom is a standalone Frappe app for coordinating issues and their next actions. An issue has one accountable owner; participants and follow-up assignees are separate. A communication may mention users, granting them continuing access to the issue history. Mentions, participants, and assignees grant access; creator and owner also have access. Next actions and dates are optional; resolving requires a resolution note. Overdue is calculated against the site date.
 
 Install on a bench with Frappe v16: install the Python app in the bench environment, build the frontend with `cd frontend && npm ci && npm run build`, add/install the app on the target site using normal bench commands, then rebuild/link bench assets and restart services. Open `/unicom`. The build copies the generated HTML into the Frappe website route; regenerate it whenever frontend assets change. Email and WhatsApp are manual timeline channels; no integrations are included.
 

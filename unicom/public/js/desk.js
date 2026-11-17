@@ -150,17 +150,14 @@
       const dialog = new frappe.ui.Dialog({
         title: __('Create UniCom issue'),
         fields: [
-          { fieldname: 'source_context', label: __('Source document'), fieldtype: 'Data', read_only: 1, default: `${source.reference_doctype}: ${source.reference_name}` },
           { fieldname: 'title', label: __('Title'), fieldtype: 'Data', reqd: 1 },
           { fieldname: 'description', label: __('Description'), fieldtype: 'Text Editor', description: __('Images can be added after creating the issue.') },
+          { fieldtype: 'Section Break' },
           { fieldname: 'accountable_owner', label: __('Issue Owner'), fieldtype: 'Link', options: 'User', reqd: 1, default: frappe.session.user, get_query: () => ({ filters: { enabled: 1 } }) },
+          { fieldtype: 'Column Break' },
           { fieldname: 'coordination_user', label: __('Coordinating with'), fieldtype: 'Link', options: 'User', get_query: () => ({ filters: { enabled: 1, user_type: 'System User' } }) },
-          { fieldname: 'participants', label: __('Participants'), fieldtype: 'MultiSelectList', get_data: async text => {
-            const response = await frappe.call({ method: 'unicom.api.users', args: { query: text || '' } })
-            return (response.message || []).map(user => ({ value: user.name, label: frappe.utils.escape_html(user.full_name || user.name), description: frappe.utils.escape_html(user.name) }))
-          } },
-          { fieldname: 'next_action', label: __('Next action'), fieldtype: 'Small Text', reqd: 1 },
-          { fieldname: 'next_action_date', label: __('Next action date'), fieldtype: 'Date', reqd: 1 }
+          { fieldtype: 'Section Break' },
+          { fieldname: 'source_context', label: __('Source document'), fieldtype: 'Data', read_only: 1, default: `${source.reference_doctype}: ${source.reference_name}` }
         ],
         primary_action_label: __('Create issue'),
         primary_action: async values => {
@@ -169,7 +166,7 @@
           dialog.disable_primary_action()
           try {
             const { source_context, ...issueValues } = values
-            const result = await frappe.call({ method: 'unicom.api.create_issue', type: 'POST', args: { ...issueValues, ...source, participants: JSON.stringify(values.participants || []) } })
+            const result = await frappe.call({ method: 'unicom.api.create_issue', type: 'POST', args: { ...issueValues, ...source } })
             const issue = result.message
             if (!issue || !issue.name) throw new Error('Missing issue')
             dialog.hide()
