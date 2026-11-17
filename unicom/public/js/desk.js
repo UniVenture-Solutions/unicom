@@ -13,7 +13,11 @@
       node.type = 'button'
       return node
     }
-    const launcher = button('UniCom', 'btn btn-primary unicom-desk-launcher')
+    const launcher = button('', 'btn unicom-desk-launcher')
+    const launcherIcon = el('img')
+    launcherIcon.src = '/assets/unicom/images/desk-chat.svg'
+    launcherIcon.alt = ''
+    launcher.append(launcherIcon)
     launcher.id = 'unicom-desk-launcher'
     launcher.setAttribute('aria-expanded', 'false')
     launcher.setAttribute('aria-controls', 'unicom-desk-panel')

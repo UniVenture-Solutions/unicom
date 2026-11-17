@@ -3,18 +3,29 @@
   z-index: 1050;
   right: 20px;
   bottom: 88px;
-  border-radius: 999px;
-  box-shadow: var(--shadow-base);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  padding: 0;
+  border: 1px solid #dbeafe;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 5px rgba(37, 99, 235, .12), 0 4px 16px rgba(0, 0, 0, .16);
 }
+.unicom-desk-launcher img { width: 28px; height: 28px; }
+.unicom-desk-launcher:hover { background: #eff6ff; }
+.unicom-desk-launcher:focus-visible { outline: 3px solid #2563eb; outline-offset: 4px; }
 .unicom-desk-panel {
   position: fixed;
   z-index: 1050;
   right: 20px;
-  bottom: 138px;
+  bottom: 160px;
   display: flex;
   flex-direction: column;
   width: min(360px, calc(100vw - 32px));
-  max-height: min(520px, calc(100vh - 154px));
+  max-height: min(520px, calc(100vh - 176px));
   overflow: hidden;
   background: var(--fg-color);
   color: var(--text-color);
