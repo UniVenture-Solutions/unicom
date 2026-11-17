@@ -18,7 +18,7 @@ const richMenu=[['Paragraph','Heading 2','Heading 3','Heading 4'],'Separator','B
 const commentBody=ref(''), commentError=ref(''), commentEditorKey=ref(0)
 const commentEditor=ref(null), replyEditor=ref(null)
 const replyRoot=ref(null), replyBody=ref(''), replyError=ref(''), replyEditorKey=ref(0), replyWindowSizes=ref({})
-watch(() => issue.value?.name, () => { commentBody.value=''; commentError.value=''; commentEditorKey.value++; replyRoot.value=null; replyBody.value=''; replyError.value=''; replyEditorKey.value++; replyWindowSizes.value={}; timelineSelection.value=new Set(timelineCategories); for(const key of Object.keys(pendingImages)) delete pendingImages[key]; pendingImageTargets.clear(); inlineField.value=''; inlineValue.value=''; inlineError.value=''; inlineDeferred.value=false; inlineOverlay=false; inlineSaveAgain=false;assignContext.value++;assignDraft.value=participantsFor(issue.value);assignError.value='';assignOpen.value=false;assignQuery.value='';assignSearchOpen.value=false;showResolve.value=false;resolutionNote.value='';resolveError.value='' }, {flush:'sync'})
+watch(() => issue.value?.name, () => { commentBody.value=''; commentError.value=''; commentEditorKey.value++; replyRoot.value=null; replyBody.value=''; replyError.value=''; replyEditorKey.value++; replyWindowSizes.value={}; timelineSelection.value=new Set(timelineCategories); for(const controller of pasteControllers.values())controller.abort();pasteControllers.clear();for(const key of Object.keys(pendingImages)) delete pendingImages[key]; pendingImageTargets.clear(); inlineField.value=''; inlineValue.value=''; inlineError.value=''; inlineDeferred.value=false; inlineOverlay=false; inlineSaveAgain=false;assignContext.value++;assignDraft.value=participantsFor(issue.value);assignError.value='';assignOpen.value=false;assignQuery.value='';assignSearchOpen.value=false;showResolve.value=false;resolutionNote.value='';resolveError.value='' }, {flush:'sync'})
 const blank=()=>({title:'',description:'',accountable_owner:'',coordination_user:'',next_action:'',next_action_date:'',participants:[],follow_up_assignees:[]})
 const form=reactive(blank()), edit=reactive({}), log=reactive({channel:'Internal Note',happened_at:'',contact:'',body:'',next_action:'',next_action_date:'',resolution_note:''})
 const columns = [{label:'Issue ID',key:'issue_id',width:'1.3fr'},{label:'Issue',key:'title',width:'3fr'},{label:'Status',key:'status',width:'1.5fr'},{label:'Issue Owner',key:'accountable_owner',width:'2fr'},{label:'Next action date',key:'next_action_date',width:'1.5fr'}]
@@ -112,7 +112,7 @@ function inlineInteraction(event){
   if(inlineSaving.value)inlineSaveAgain=true;else saveInline()
 }
 function onInlineFocusOut(){setTimeout(()=>{const active=document.activeElement;if(active && active!==document.body && active!==document.documentElement)inlineInteraction({target:active})},0)}
-function setInlineEditor(component){inlineEditor.value=component;labelEditor(component,inlineEditor,'description-editor-label')}
+function setInlineEditor(component){inlineEditor.value=component;labelEditor(component,inlineEditor,'description-editor-label','description')}
 async function editIssue(){if(assignSavePromise && !await assignSavePromise)return false;if(assignmentDirty.value)return false;if(inlineField.value && !await saveInline())return false;Object.assign(edit,{title:issue.value.title,description:issue.value.description||'',accountable_owner:issue.value.accountable_owner,coordination_user:issue.value.coordination_user||'',status:issue.value.status,next_action:issue.value.next_action||'',next_action_date:issue.value.next_action_date||'',resolution_note:issue.value.resolution_note||'',participants:issue.value.access.filter(x=>x.reason==='Participant').map(x=>x.user),follow_up_assignees:issue.value.access.filter(x=>x.reason==='Follow-up').map(x=>x.user)});showEdit.value=true;return true}
 watch(issue,doc=>{if(!assignSaving.value && !assignError.value)assignDraft.value=participantsFor(doc)},{flush:'sync'})
 function participantsFor(doc){return [...new Set((doc?.access||[]).filter(row=>row.reason==='Participant' && row.user).map(row=>row.user))]}
@@ -186,7 +186,7 @@ function submitShortcut(event,root=null){
   if(root)saveReply(root);else saveComment()
 }
 async function saveComment(){
-  if(busy.value) return
+  if(busy.value || hasPendingImages.value) return
   busy.value=true; commentError.value=''
   const name=issue.value.name
   try { const updated=await api('add_comment',{name,body:commentBody.value},true); if(issue.value?.name===name){issue.value=updated;commentBody.value='';commentEditorKey.value++} }
@@ -197,26 +197,27 @@ function replyParticipants(thread){return [...new Set(thread.replies.map(reply=>
 function visibleReplies(thread){return thread.replies.slice(-(replyWindowSizes.value[thread.event.name] || 3))}
 function earlierReplyCount(thread){return Math.max(0,thread.replies.length-visibleReplies(thread).length)}
 function loadEarlierReplies(root){replyWindowSizes.value={...replyWindowSizes.value,[root]:(replyWindowSizes.value[root] || 3)+3};if(replyRoot.value===root) nextTick(()=>{if(replyRoot.value===root) replyEditor.value?.editor?.commands.focus()})}
-function labelEditor(component, current, labelId){
+function labelEditor(component, current, labelId, scope){
   if(!component) return
   nextTick(()=>{
     if(current.value!==component) return
     const editor=component.editor
     if(!editor || editor.isDestroyed) return
     const props=editor.options.editorProps || {}
-    editor.setOptions({editorProps:{...props,handlePaste:(_view,event)=>Array.from(event.clipboardData?.items||[]).some(item=>item.type.startsWith('image/')),handleDrop:(_view,event)=>Array.from(event.dataTransfer?.files||[]).some(file=>file.type.startsWith('image/')),attributes:{...props.attributes,role:'textbox','aria-multiline':'true','aria-labelledby':labelId}}})
+    editor.setOptions({editorProps:{...props,handlePaste:(_view,event)=>pasteImages(event,current,scope),handleDrop:(_view,event)=>Array.from(event.dataTransfer?.files||[]).some(file=>file.type.startsWith('image/')),attributes:{...props.attributes,role:'textbox','aria-multiline':'true','aria-labelledby':labelId}}})
   })
 }
-function setCommentEditor(component){commentEditor.value=component;labelEditor(component,commentEditor,'comment-editor-label')}
-function setReplyEditor(component,root){replyEditor.value=component;labelEditor(component,replyEditor,'reply-editor-label-'+root)}
-const pendingImageTargets = new Map()
+function setCommentEditor(component){commentEditor.value=component;labelEditor(component,commentEditor,'comment-editor-label','comment')}
+function setReplyEditor(component,root){replyEditor.value=component;labelEditor(component,replyEditor,'reply-editor-label-'+root,'reply')}
+const pendingImageTargets = new Map(), pasteControllers = new Map()
+let pasteSequence=0
 function validateImage(file, key){if(file.size>10*1024*1024)return 'Maximum image size is 10 MB'; pendingImages[key]=true;return null}
 function beginImageUpload(open, target, scope, key){
   pendingImageTargets.set(key,{name:issue.value?.name,editor:target?.editor,root:replyRoot.value,commentKey:commentEditorKey.value,replyKey:replyEditorKey.value,field:inlineField.value})
   open()
 }
-function insertImage(file, target, scope, key){
-  const context=pendingImageTargets.get(key); pendingImageTargets.delete(key); delete pendingImages[key]
+function insertImage(file, target, scope, key, bookmark=null){
+  const context=pendingImageTargets.get(key); if(!bookmark){pendingImageTargets.delete(key);delete pendingImages[key]}
   const uploadedFor=new URL(file.file_url,location.origin).searchParams.get('name')
   const editor=target?.editor
   if(!context || !issue.value || context.name!==issue.value.name || uploadedFor!==context.name || !editor || editor!==context.editor || editor.isDestroyed) return
@@ -224,15 +225,67 @@ function insertImage(file, target, scope, key){
   if(scope==='reply' && (context.replyKey!==replyEditorKey.value || context.root!==replyRoot.value)) return
   if(scope==='description' && (context.field!=='description' || inlineField.value!=='description')) return
   const src='/api/method/unicom.api.inline_image?'+new URLSearchParams({name:uploadedFor,attachment:file.name})
-  editor.chain().focus().setImage({src,alt:file.file_name}).run()
+  if(bookmark){
+    const selection=bookmark.nextPos===null?bookmark.current.resolve(editor.state.doc):{from:bookmark.nextPos,to:bookmark.nextPos}
+    if(!editor.commands.insertContentAt({from:selection.from,to:selection.to},{type:'image',attrs:{src,alt:file.file_name}},{updateSelection:false}))throw new Error('Could not insert pasted image')
+    let end=null;editor.state.doc.descendants((node,pos)=>{if(node.type.name==='image' && node.attrs.src===src)end=pos+node.nodeSize})
+    if(end===null)throw new Error('Could not insert pasted image')
+    bookmark.nextPos=end
+  }
+  else editor.chain().focus().setImage({src,alt:file.file_name}).run()
   if(!issue.value.attachments.some(x=>x.name===file.name)) issue.value.attachments.push(file)
-  if(scope==='description' && inlineDeferred.value){inlineDeferred.value=false;nextTick(()=>saveInline())}
+  if(!bookmark && scope==='description' && inlineDeferred.value){inlineDeferred.value=false;nextTick(()=>saveInline())}
+}
+function setPasteError(scope, message){
+  if(scope==='description')inlineError.value=message
+  else if(scope==='comment')commentError.value=message
+  else replyError.value=message
+}
+function pasteImages(event,target,scope){
+  const clipboard=event.clipboardData
+  const fromItems=Array.from(clipboard?.items||[]).filter(item=>item.type?.startsWith('image/')).map(item=>item.getAsFile()).filter(Boolean)
+  const files=fromItems.length ? fromItems : Array.from(clipboard?.files||[]).filter(file=>file.type?.startsWith('image/'))
+  if(!files.length)return false
+  event.preventDefault()
+  if(busy.value || hasPendingImages.value){setPasteError(scope,'Wait for the current operation before pasting an image.');return true}
+  if(files.some(file=>file.size>10*1024*1024)){setPasteError(scope,'Maximum image size is 10 MB');return true}
+  const editor=target.value?.editor
+  if(!editor || editor.isDestroyed || !issue.value){setPasteError(scope,'Unable to paste image. Please try again.');return true}
+  setPasteError(scope,'')
+  const key='paste:'+scope+':'+(++pasteSequence), controller=new AbortController()
+  const context={name:issue.value.name,editor,root:replyRoot.value,commentKey:commentEditorKey.value,replyKey:replyEditorKey.value,field:inlineField.value}
+  const bookmark={current:editor.state.selection.getBookmark(),nextPos:null}
+  const mapBookmark=({transaction})=>{bookmark.current=bookmark.current.map(transaction.mapping);if(bookmark.nextPos!==null)bookmark.nextPos=transaction.mapping.map(bookmark.nextPos,1)}
+  editor.on('transaction',mapBookmark)
+  pendingImageTargets.set(key,context);pendingImages[key]=true;pasteControllers.set(key,controller)
+  void uploadPastedImages(files,target,scope,key,context,bookmark,controller).finally(()=>editor.off('transaction',mapBookmark))
+  return true
+}
+async function uploadPastedImages(files,target,scope,key,context,bookmark,controller){
+  let succeeded=false
+  try{
+    for(let i=0;i<files.length;i++){
+      const form=new FormData(), file=files[i]
+      const extension=({'image/jpeg':'jpg','image/png':'png','image/gif':'gif','image/webp':'webp'})[file.type]||'image'
+      form.append('file',file,'pasted-image-'+(i+1)+'.'+extension);form.append('docname',context.name)
+      const response=await fetch('/api/method/unicom.api.upload_image',{method:'POST',credentials:'same-origin',headers:{'X-Frappe-CSRF-Token':csrf()},body:form,signal:controller.signal})
+      const result=await response.json()
+      if(!response.ok){let message=result.exception||'Image upload failed';try{const messages=JSON.parse(result._server_messages||'[]');if(messages.length)message=JSON.parse(messages[0]).message}catch{}throw new Error(message)}
+      if(pendingImageTargets.get(key)!==context) return
+      insertImage(result.message,target.value,scope,key,bookmark)
+    }
+    succeeded=true
+  }catch(e){if(pendingImageTargets.get(key)===context && e.name!=='AbortError')setPasteError(scope,e.message||'Image upload failed')}
+  finally{
+    if(pendingImageTargets.get(key)===context){pendingImageTargets.delete(key);delete pendingImages[key];if(scope==='description' && inlineDeferred.value){inlineDeferred.value=false;if(succeeded)nextTick(()=>saveInline())}}
+    pasteControllers.delete(key)
+  }
 }
 function imageUploadFailed(key,scope){delete pendingImages[key];pendingImageTargets.delete(key);if(scope==='description' && inlineDeferred.value){inlineDeferred.value=false;inlineError.value='Image upload failed. Your description draft is still available.'}}
 function startReply(root){if(hasPendingImages.value)return;if(replyRoot.value!==root){replyRoot.value=root;replyBody.value='';replyError.value='';replyEditorKey.value++} nextTick(()=>replyEditor.value?.editor?.commands.focus())}
 function cancelReply(){replyRoot.value=null;replyBody.value='';replyError.value='';replyEditorKey.value++}
 async function saveReply(root){
-  if(busy.value || replyRoot.value!==root) return
+  if(busy.value || hasPendingImages.value || replyRoot.value!==root) return
   busy.value=true; replyError.value=''
   const name=issue.value.name
   try { const updated=await api('add_comment',{name,body:replyBody.value,reply_to:root},true); if(issue.value?.name===name && replyRoot.value===root){issue.value=updated;cancelReply()} }
@@ -256,7 +309,7 @@ function fieldLabel(key){return ({accountable_owner:'Issue Owner',coordination_u
 function changeValue(value,key){if(value===null || value===undefined || value==='') return '—'; if(Array.isArray(value)) return value.length ? value.join(', ') : '—'; if(typeof value==='object') return JSON.stringify(value); if(key==='next_action_date') return formatSiteTime(value); return String(value)}
 function changes(event){try{const data=JSON.parse(event.changes||'{}');return Object.entries(data).map(([key,value])=>({label:fieldLabel(key),text:`${changeValue(value?.from,key)} → ${changeValue(value?.to,key)}`,raw:JSON.stringify(value)}))}catch{return event.changes ? [{label:'Changes',text:event.changes,raw:event.changes}] : []}}
 
-onBeforeUnmount(()=>{document.removeEventListener('pointerdown',inlineInteraction,true);document.removeEventListener('focusin',inlineInteraction,true);document.removeEventListener('focusout',onInlineFocusOut,true)})
+onBeforeUnmount(()=>{for(const controller of pasteControllers.values())controller.abort();pasteControllers.clear();pendingImageTargets.clear();for(const key of Object.keys(pendingImages))delete pendingImages[key];document.removeEventListener('pointerdown',inlineInteraction,true);document.removeEventListener('focusin',inlineInteraction,true);document.removeEventListener('focusout',onInlineFocusOut,true)})
 onMounted(async()=>{document.addEventListener('pointerdown',inlineInteraction,true);document.addEventListener('focusin',inlineInteraction,true);document.addEventListener('focusout',onInlineFocusOut,true);fetch('/api/method/frappe.auth.get_logged_user',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(r=>{currentUser.value=r?.message||''}).catch(()=>{});await run(async()=>{people.value=await api('users'); const name=decodeURIComponent(location.pathname.replace(/^\/unicom\/?/,'')); if(name) await open(name,false); else await load()});window.onpopstate=async()=>{const name=decodeURIComponent(location.pathname.replace(/^\/unicom\/?/,''));if(name){if(issue.value?.name!==name && !await canLeaveInline()){history.pushState({},'', '/unicom/'+encodeURIComponent(issue.value.name));return}open(name,false,true)}else{if(!await canLeaveInline()){history.pushState({},'', '/unicom/'+encodeURIComponent(issue.value.name));return}issue.value=null;load()}};window.addEventListener('beforeunload',event=>{if(inlineField.value && inlineValue.value!==(issue.value?.[inlineField.value]||'')){event.preventDefault();event.returnValue=''}})})
 </script>
 <template>
@@ -292,11 +345,11 @@ onMounted(async()=>{document.addEventListener('pointerdown',inlineInteraction,tr
     <div v-else class="min-h-0 flex-1 overflow-y-auto">
       <div class="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_350px] lg:grid-rows-[auto_1fr]">
         <div class="order-1 w-full min-w-0 max-w-4xl mx-auto p-6 flex flex-wrap justify-between gap-4 items-start"><div class="min-w-0 flex-1 basis-64"><div v-if="inlineField==='title'" ref="inlineRegion" class="space-y-2"><FormControl v-model="inlineValue" label="Title" @keydown.enter="saveInline" @keydown.esc="cancelInline"/><ErrorMessage :message="safeInlineError"/><Button v-if="inlineError" size="sm" @click="saveInline">Retry</Button></div><h1 v-else class="text-2xl font-semibold break-words"><Button variant="ghost" class="!h-auto !p-0 !text-2xl" aria-label="Edit title" @click="startInline('title')">{{issue.title}}</Button></h1><p class="text-sm text-gray-500 mt-2">{{issue.issue_id || issue.name}} · Created by {{authorName(issue.owner)}}</p></div></div>
-        <section class="order-3 lg:order-2 w-full min-w-0 max-w-4xl mx-auto px-6 pb-6 space-y-6 break-words"><div><h2 class="font-semibold mb-2">Description</h2><div v-if="inlineField==='description'" ref="inlineRegion" class="space-y-2"><div id="description-editor-label" class="text-sm">Edit description</div><FileUploader v-for="uploadKey in [issue.name+':description:'+inlineKey]" :key="uploadKey" file-types="image/png,image/jpeg,image/gif,image/webp" :upload-args="{upload_endpoint:'/api/method/unicom.api.upload_image',docname:issue.name,private:true}" :validate-file="f=>validateImage(f,uploadKey)" @success="file=>insertImage(file,inlineEditor,'description',uploadKey)" @failure="imageUploadFailed(uploadKey,'description')"><template #default="{openFileSelector,uploading,error:uploadError}"><TextEditor :ref="setInlineEditor" class="rich-editor" :content="inlineValue" :fixed-menu="richMenu" @change="value=>inlineValue=value"><template #bottom><div class="editor-image-action"><Button size="sm" variant="ghost" icon="image" label="Attach image" title="Attach image" :loading="uploading" :disabled="busy || uploading || pendingImages[uploadKey]" @click="beginImageUpload(openFileSelector,inlineEditor,'description',uploadKey)"/></div></template></TextEditor><ErrorMessage :message="uploadError"/><ErrorMessage :message="safeInlineError"/><Button v-if="inlineError" size="sm" @click="saveInline">Retry</Button></template></FileUploader></div><div v-else><div class="prose prose-sm max-w-none text-gray-700" role="button" tabindex="0" aria-label="Edit description" @click="editDescription" @keydown.enter="editDescription" @keydown.space="editDescription" v-html="issue.description || '—'"></div></div></div><div>
+        <section class="order-3 lg:order-2 w-full min-w-0 max-w-4xl mx-auto px-6 pb-6 space-y-6 break-words"><div><h2 class="font-semibold mb-2">Description</h2><div v-if="inlineField==='description'" ref="inlineRegion" class="space-y-2"><div id="description-editor-label" class="text-sm">Edit description</div><FileUploader v-for="uploadKey in [issue.name+':description:'+inlineKey]" :key="uploadKey" file-types="image/png,image/jpeg,image/gif,image/webp" :upload-args="{upload_endpoint:'/api/method/unicom.api.upload_image',docname:issue.name,private:true}" :validate-file="f=>validateImage(f,uploadKey)" @success="file=>insertImage(file,inlineEditor,'description',uploadKey)" @failure="imageUploadFailed(uploadKey,'description')"><template #default="{openFileSelector,uploading,error:uploadError}"><TextEditor :ref="setInlineEditor" class="rich-editor" :content="inlineValue" :fixed-menu="richMenu" @change="value=>inlineValue=value"><template #bottom><div class="editor-image-action"><Button size="sm" variant="ghost" icon="image" label="Attach image" title="Attach image" :loading="uploading" :disabled="busy || uploading || hasPendingImages" @click="beginImageUpload(openFileSelector,inlineEditor,'description',uploadKey)"/></div></template></TextEditor><ErrorMessage :message="uploadError"/><ErrorMessage :message="safeInlineError"/><Button v-if="inlineError" size="sm" @click="saveInline">Retry</Button></template></FileUploader></div><div v-else><div class="prose prose-sm max-w-none text-gray-700" role="button" tabindex="0" aria-label="Edit description" @click="editDescription" @keydown.enter="editDescription" @keydown.space="editDescription" v-html="issue.description || '—'"></div></div></div><div>
           <div class="flex flex-wrap items-center justify-between gap-2 mb-4"><h2 class="font-semibold">Timeline</h2><div role="group" aria-label="Filter timeline" class="flex flex-wrap gap-1"><Button size="sm" :variant="allTimelineSelected?'subtle':'ghost'" :aria-pressed="allTimelineSelected" :disabled="hasPendingImages" @click="selectAllTimeline">All</Button><Button v-for="category in timelineCategories" :key="category" size="sm" :variant="!allTimelineSelected && timelineSelection.has(category)?'subtle':'ghost'" :aria-pressed="!allTimelineSelected && timelineSelection.has(category)" :disabled="hasPendingImages" @click="toggleTimelineCategory(category)">{{category}}</Button></div></div>
           <div class="mb-4"><Button variant="solid" :disabled="(busy &amp;&amp; !inlineSaving) || issue.status==='Resolved'" @click="logIssue">Log communication</Button></div>
           <p v-if="hasPendingImages" role="status" class="mb-3 text-xs text-gray-600">Uploading image… Timeline filters will be available when the upload finishes.</p><div class="mb-8 rounded-lg border border-gray-200 p-3 space-y-2">
-            <div id="comment-editor-label" class="text-xs font-medium text-gray-600">Add a comment</div><FileUploader v-for="uploadKey in [issue.name+':comment:'+commentEditorKey]" :key="uploadKey" file-types="image/png,image/jpeg,image/gif,image/webp" :upload-args="{upload_endpoint:'/api/method/unicom.api.upload_image',docname:issue.name,private:true}" :validate-file="f=>validateImage(f,uploadKey)" @success="file=>insertImage(file,commentEditor,'comment',uploadKey)" @failure="delete pendingImages[uploadKey]"><template #default="{openFileSelector,uploading,error:uploadError}"><div @keydown="submitShortcut($event)"><TextEditor :ref="setCommentEditor" :key="commentEditorKey" class="timeline-editor rich-editor" :content="commentBody" :fixed-menu="richMenu" :mentions="mentionOptions" placeholder="Write a comment; type @ to mention someone" @change="value=>commentBody=value"><template #bottom><div class="editor-image-action"><Button size="sm" variant="ghost" icon="image" label="Attach image" title="Attach image" :loading="uploading" :disabled="busy || uploading || pendingImages[uploadKey]" @click="beginImageUpload(openFileSelector,commentEditor,'comment',uploadKey)"/></div></template></TextEditor></div><ErrorMessage :message="uploadError"/><ErrorMessage :message="safeCommentError"/><div class="flex justify-end"><Button variant="solid" :loading="busy" :disabled="busy || uploading || pendingImages[uploadKey]" title="Post comment (Ctrl+Enter or Cmd+Enter)" @click="saveComment">Post comment</Button></div></template></FileUploader>
+            <div id="comment-editor-label" class="text-xs font-medium text-gray-600">Add a comment</div><FileUploader v-for="uploadKey in [issue.name+':comment:'+commentEditorKey]" :key="uploadKey" file-types="image/png,image/jpeg,image/gif,image/webp" :upload-args="{upload_endpoint:'/api/method/unicom.api.upload_image',docname:issue.name,private:true}" :validate-file="f=>validateImage(f,uploadKey)" @success="file=>insertImage(file,commentEditor,'comment',uploadKey)" @failure="delete pendingImages[uploadKey]"><template #default="{openFileSelector,uploading,error:uploadError}"><div @keydown="submitShortcut($event)"><TextEditor :ref="setCommentEditor" :key="commentEditorKey" class="timeline-editor rich-editor" :content="commentBody" :fixed-menu="richMenu" :mentions="mentionOptions" placeholder="Write a comment; type @ to mention someone" @change="value=>commentBody=value"><template #bottom><div class="editor-image-action"><Button size="sm" variant="ghost" icon="image" label="Attach image" title="Attach image" :loading="uploading" :disabled="busy || uploading || hasPendingImages" @click="beginImageUpload(openFileSelector,commentEditor,'comment',uploadKey)"/></div></template></TextEditor></div><ErrorMessage :message="uploadError"/><ErrorMessage :message="safeCommentError"/><div class="flex justify-end"><Button variant="solid" :loading="busy" :disabled="busy || uploading || hasPendingImages" title="Post comment (Ctrl+Enter or Cmd+Enter)" @click="saveComment">Post comment</Button></div></template></FileUploader>
           </div>
           <div v-if="hiddenReplyDraft" class="mb-4 text-xs text-gray-600">A reply draft is in a hidden thread. Select its category or All to continue.</div>
           <div v-if="!filteredThreads.length" class="py-4 text-sm text-gray-600">{{timelineSelection.size ? 'No entries match the selected filters.' : 'Select a category to see timeline entries.'}} <Button size="sm" variant="ghost" :disabled="hasPendingImages" @click="selectAllTimeline">Show all</Button></div>
@@ -321,7 +374,7 @@ onMounted(async()=>{document.addEventListener('pointerdown',inlineInteraction,tr
                   <div v-if="thread.replies.length || replyRoot===thread.event.name" :id="'thread-'+thread.event.name" class="ml-6 sm:ml-[3.75rem] mr-4 mb-4 border-l-2 border-gray-200 pl-3 space-y-3">
                     <Button v-if="earlierReplyCount(thread)" variant="ghost" size="sm" @click="loadEarlierReplies(thread.event.name)">Load more replies ({{earlierReplyCount(thread)}} earlier)</Button>
                     <div v-for="reply in visibleReplies(thread)" :key="reply.name" class="flex gap-2"><Avatar :key="reply.actor+userImage(reply.actor)" size="md" :label="authorName(reply.actor)" :image="userImage(reply.actor)"/><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-x-2"><span class="text-sm font-medium">{{authorName(reply.actor)}}</span><span class="text-xs text-gray-500" :title="'Recorded: '+reply.recorded_at">{{formatSiteTime(reply.recorded_at)}}</span></div><div class="prose prose-sm max-w-none text-gray-800 mt-1" v-html="reply.body"></div><Button variant="ghost" size="sm" class="mt-1" :disabled="busy || hasPendingImages || (replyRoot && replyRoot!==thread.event.name)" :aria-label="'Reply to '+authorName(reply.actor)+' in this thread'" @click="startReply(thread.event.name)">Reply<span class="sr-only"> to {{authorName(reply.actor)}} in this thread</span></Button></div></div>
-                    <div v-if="replyRoot===thread.event.name" class="space-y-2"><div :id="'reply-editor-label-'+thread.event.name" class="text-xs font-medium text-gray-600">Reply in thread</div><FileUploader v-for="uploadKey in [issue.name+':reply:'+replyRoot+':'+replyEditorKey]" :key="uploadKey" file-types="image/png,image/jpeg,image/gif,image/webp" :upload-args="{upload_endpoint:'/api/method/unicom.api.upload_image',docname:issue.name,private:true}" :validate-file="f=>validateImage(f,uploadKey)" @success="file=>insertImage(file,replyEditor,'reply',uploadKey)" @failure="delete pendingImages[uploadKey]"><template #default="{openFileSelector,uploading,error:uploadError}"><div @keydown="submitShortcut($event,thread.event.name)"><TextEditor :ref="component=>setReplyEditor(component,thread.event.name)" :key="replyEditorKey" class="timeline-editor rich-editor" :content="replyBody" :fixed-menu="richMenu" :mentions="mentionOptions" placeholder="Write a reply; type @ to mention someone" @change="value=>replyBody=value"><template #bottom><div class="editor-image-action"><Button size="sm" variant="ghost" icon="image" label="Attach image" title="Attach image" :loading="uploading" :disabled="busy || uploading || pendingImages[uploadKey]" @click="beginImageUpload(openFileSelector,replyEditor,'reply',uploadKey)"/></div></template></TextEditor></div><ErrorMessage :message="uploadError"/><ErrorMessage :message="safeReplyError"/><div class="flex justify-end gap-2"><Button :disabled="busy || uploading || pendingImages[uploadKey]" @click="cancelReply">Cancel</Button><Button variant="solid" :loading="busy" :disabled="busy || uploading || pendingImages[uploadKey]" title="Post reply (Ctrl+Enter or Cmd+Enter)" @click="saveReply(thread.event.name)">Post reply</Button></div></template></FileUploader></div>
+                    <div v-if="replyRoot===thread.event.name" class="space-y-2"><div :id="'reply-editor-label-'+thread.event.name" class="text-xs font-medium text-gray-600">Reply in thread</div><FileUploader v-for="uploadKey in [issue.name+':reply:'+replyRoot+':'+replyEditorKey]" :key="uploadKey" file-types="image/png,image/jpeg,image/gif,image/webp" :upload-args="{upload_endpoint:'/api/method/unicom.api.upload_image',docname:issue.name,private:true}" :validate-file="f=>validateImage(f,uploadKey)" @success="file=>insertImage(file,replyEditor,'reply',uploadKey)" @failure="delete pendingImages[uploadKey]"><template #default="{openFileSelector,uploading,error:uploadError}"><div @keydown="submitShortcut($event,thread.event.name)"><TextEditor :ref="component=>setReplyEditor(component,thread.event.name)" :key="replyEditorKey" class="timeline-editor rich-editor" :content="replyBody" :fixed-menu="richMenu" :mentions="mentionOptions" placeholder="Write a reply; type @ to mention someone" @change="value=>replyBody=value"><template #bottom><div class="editor-image-action"><Button size="sm" variant="ghost" icon="image" label="Attach image" title="Attach image" :loading="uploading" :disabled="busy || uploading || hasPendingImages" @click="beginImageUpload(openFileSelector,replyEditor,'reply',uploadKey)"/></div></template></TextEditor></div><ErrorMessage :message="uploadError"/><ErrorMessage :message="safeReplyError"/><div class="flex justify-end gap-2"><Button :disabled="busy || uploading || hasPendingImages" @click="cancelReply">Cancel</Button><Button variant="solid" :loading="busy" :disabled="busy || uploading || hasPendingImages" title="Post reply (Ctrl+Enter or Cmd+Enter)" @click="saveReply(thread.event.name)">Post reply</Button></div></template></FileUploader></div>
                   </div>
               </article>
               <div v-else class="flex gap-3 rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-600">
