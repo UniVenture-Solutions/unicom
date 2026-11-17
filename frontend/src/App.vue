@@ -307,7 +307,21 @@ function formatSiteTime(value){
 }
 function fieldLabel(key){return ({accountable_owner:'Issue Owner',coordination_user:'Coordinating with',next_action:'Next action',next_action_date:'Next action date',resolution_note:'Resolution note',follow_up_assignees:'Follow-up assignees'})[key] || key.replaceAll('_',' ').replace(/^./,c=>c.toUpperCase())}
 function changeValue(value,key){if(value===null || value===undefined || value==='') return '—'; if(Array.isArray(value)) return value.length ? value.join(', ') : '—'; if(typeof value==='object') return JSON.stringify(value); if(key==='next_action_date') return formatSiteTime(value); return String(value)}
-function changes(event){try{const data=JSON.parse(event.changes||'{}');return Object.entries(data).map(([key,value])=>({label:fieldLabel(key),text:`${changeValue(value?.from,key)} → ${changeValue(value?.to,key)}`,raw:JSON.stringify(value)}))}catch{return event.changes ? [{label:'Changes',text:event.changes,raw:event.changes}] : []}}
+function descriptionSummary(value){
+  const doc=new DOMParser().parseFromString(typeof value==='string'?value:'','text/html')
+  const images=doc.body.querySelectorAll('img').length
+  doc.body.querySelectorAll('img,script,style,iframe,object,embed,video,audio,source,link').forEach(node=>node.remove())
+  doc.body.querySelectorAll('p,div,li,blockquote,pre,h1,h2,h3,h4,h5,h6,tr').forEach(node=>node.append(' '))
+  return {text:(doc.body.textContent||'').replace(/\s+/g,' ').trim(),images}
+}
+function descriptionChange(value){
+  const before=descriptionSummary(value?.from),after=descriptionSummary(value?.to)
+  if(before.text===after.text && before.images===after.images)return 'Description updated'
+  const show=part=>[part.text,part.images ? part.images+' '+(part.images===1?'image':'images') : ''].filter(Boolean).join(' · ')||'—'
+  return show(before)+' → '+show(after)
+}
+function changes(event){try{const data=JSON.parse(event.changes||'{}');return Object.entries(data).map(([key,value])=>key==='description'?{label:fieldLabel(key),text:descriptionChange(value),raw:null}:{label:fieldLabel(key),text:changeValue(value?.from,key)+' → '+changeValue(value?.to,key),raw:JSON.stringify(value)})}catch{return event.changes ? [{label:'Changes',text:event.changes,raw:event.changes}] : []}}
+
 
 onBeforeUnmount(()=>{for(const controller of pasteControllers.values())controller.abort();pasteControllers.clear();pendingImageTargets.clear();for(const key of Object.keys(pendingImages))delete pendingImages[key];document.removeEventListener('pointerdown',inlineInteraction,true);document.removeEventListener('focusin',inlineInteraction,true);document.removeEventListener('focusout',onInlineFocusOut,true)})
 onMounted(async()=>{document.addEventListener('pointerdown',inlineInteraction,true);document.addEventListener('focusin',inlineInteraction,true);document.addEventListener('focusout',onInlineFocusOut,true);fetch('/api/method/frappe.auth.get_logged_user',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(r=>{currentUser.value=r?.message||''}).catch(()=>{});await run(async()=>{people.value=await api('users'); const name=decodeURIComponent(location.pathname.replace(/^\/unicom\/?/,'')); if(name) await open(name,false); else await load()});window.onpopstate=async()=>{const name=decodeURIComponent(location.pathname.replace(/^\/unicom\/?/,''));if(name){if(issue.value?.name!==name && !await canLeaveInline()){history.pushState({},'', '/unicom/'+encodeURIComponent(issue.value.name));return}open(name,false,true)}else{if(!await canLeaveInline()){history.pushState({},'', '/unicom/'+encodeURIComponent(issue.value.name));return}issue.value=null;load()}};window.addEventListener('beforeunload',event=>{if(inlineField.value && inlineValue.value!==(issue.value?.[inlineField.value]||'')){event.preventDefault();event.returnValue=''}})})
