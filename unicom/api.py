@@ -12,6 +12,7 @@ import frappe
 from frappe import _
 from frappe.utils import getdate, now_datetime, today
 from unicom.permissions import issue_permission
+from unicom.notifications import notify_mentions as _notify_mentions
 
 STATUSES = ('Open', 'In Progress', 'Waiting', 'Resolved')
 CHANNELS = ('Internal Note', 'Call', 'Meeting', 'Email', 'WhatsApp')
@@ -117,13 +118,18 @@ def _set_users(doc, reason, users):
             doc.append('access', {'user': user, 'reason': reason})
 
 
-def _grant_mentions(doc, clean_html):
-    # Only explicit, nonempty mention nodes retained by sanitization grant access.
+def _mentioned_users(clean_html):
+    # Extract only explicit, nonempty nodes retained by the rich-text sanitizer.
     parsed = BeautifulSoup(clean_html, 'html.parser')
-    users = [node.get('data-id') for node in parsed.select('span[data-type="mention"][data-id]') if node.get_text(strip=True)]
-    for user in _users(users):
+    return list(dict.fromkeys(node.get('data-id') for node in parsed.select('span[data-type="mention"][data-id]') if node.get_text(strip=True)))
+
+
+def _grant_mentions(doc, clean_html):
+    users = _users(_mentioned_users(clean_html))
+    for user in users:
         if not any(row.user == user and row.reason == 'Mention' for row in doc.access):
             doc.append('access', {'user': user, 'reason': 'Mention'})
+    return users
 
 
 def _snapshot(doc):
@@ -265,6 +271,18 @@ def list_issues(view='all', status=None, search=None, start=0, page_length=20):
 
 
 @frappe.whitelist()
+def list_notifications(start=0, page_length=20):
+    from unicom.notifications import list_for_user
+    return list_for_user(_user(), start, page_length)
+
+
+@frappe.whitelist(methods=['POST'])
+def mark_notification_read(name):
+    from unicom.notifications import mark_read_for_user
+    return mark_read_for_user(_user(), name)
+
+
+@frappe.whitelist()
 def get_issue(name):
     return _output(_doc(name))
 
@@ -280,11 +298,12 @@ def create_issue(title, accountable_owner, next_action='', next_action_date=None
     doc.update({'reference_doctype': reference_doctype, 'reference_name': reference_name, 'title': title, 'description': _rich_html(description or ''), 'accountable_owner': accountable_owner, 'coordination_user': _coordination_selection(coordination_user), 'status': 'Open', 'next_action': next_action, 'next_action_date': next_action_date})
     _set_users(doc, 'Participant', participants)
     _set_users(doc, 'Follow-up', follow_up_assignees)
-    _grant_mentions(doc, doc.description)
+    mentioned_users = _grant_mentions(doc, doc.description)
     _validate(doc)
     _event(doc, 'Created')
     doc.flags.unicom_api = True
     doc.insert(ignore_permissions=True)
+    _notify_mentions(doc, mentioned_users, 'description')
     return _output(doc)
 
 
@@ -304,19 +323,22 @@ def update_issue(name, values):
     if source:
         _ensure_no_active_source(*source, exclude=name)
     before = _snapshot(doc)
+    description_mentions = []
     for key, val in values.items():
         if key == 'participants': _set_users(doc, 'Participant', val)
         elif key == 'follow_up_assignees': _set_users(doc, 'Follow-up', val)
         elif key == 'coordination_user': doc.coordination_user = _coordination_selection(val, current=getattr(doc, 'coordination_user', None))
         elif key == 'description' and (val or '') != (doc.description or ''):
+            previous_mentions = set(_mentioned_users(doc.description or ''))
             doc.description = _rich_html(val or '', doc)
-            _grant_mentions(doc, doc.description)
+            description_mentions = [user for user in _grant_mentions(doc, doc.description) if user not in previous_mentions]
         elif key != 'description': doc.set(key, val)
     _validate(doc)
     kind = 'Resolved' if before['status'] != 'Resolved' and doc.status == 'Resolved' else 'Reopened' if before['status'] == 'Resolved' and doc.status != 'Resolved' else 'Updated'
     _event(doc, kind, before)
     doc.flags.unicom_api = True
     doc.save(ignore_permissions=True)
+    _notify_mentions(doc, description_mentions, 'description')
     return _output(doc)
 
 
@@ -359,11 +381,12 @@ def add_comment(name, body, reply_to=None):
     text = parsed.get_text().replace('\u200b', '').replace('\ufeff', '').strip()
     if not text and not parsed.find('img'):
         frappe.throw(_('A comment is required'))
-    _grant_mentions(doc, clean_body)
+    mentioned_users = _grant_mentions(doc, clean_body)
     _validate(doc)
     _event(doc, 'Comment', body=clean_body, reply_to=reply_to or None)
     doc.flags.unicom_api = True
     doc.save(ignore_permissions=True)
+    _notify_mentions(doc, mentioned_users, 'reply' if reply_to else 'comment')
     return _output(doc)
 
 

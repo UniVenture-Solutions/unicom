@@ -29,7 +29,7 @@ class DescriptionMentionTests(unittest.TestCase):
         patches = [patch.object(frappe, 'session', self.session), patch.object(frappe, 'db', self.db),
                    patch.object(frappe, 'new_doc', return_value=self.doc), patch.object(frappe, 'get_doc', return_value=self.doc),
                    patch.object(frappe, 'throw', side_effect=self.throw),
-                   patch.object(api, '_output', side_effect=lambda doc: doc),
+                   patch.object(api, '_output', side_effect=lambda doc: doc), patch.object(api, '_notify_mentions'),
                    patch.object(api, 'now_datetime', return_value='2026-11-18 16:00:00')]
         for item in patches:
             item.start()

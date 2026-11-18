@@ -22,3 +22,12 @@ def issue_permission(doc, user=None, ptype=None, debug=False):
         return False
     return bool(doc.owner == user or doc.accountable_owner == user or any(row.user == user for row in doc.access))
 
+
+
+def notification_permission(doc, user=None, ptype=None, debug=False):
+    # Controller hooks only restrict native DocType permissions. A truthy return
+    # is required to preserve Frappe's existing behavior for other notifications.
+    if getattr(doc, 'document_type', None) != 'UniCom Issue':
+        return True
+    user = user or frappe.session.user
+    return user == 'Administrator' or (user != 'Guest' and user == doc.for_user)
