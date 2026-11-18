@@ -59,7 +59,8 @@ class IssueIdTests(unittest.TestCase):
 
     def test_preassigned_and_changed_ids_are_rejected(self):
         def throw(message, exception=None): raise (exception or ValueError)(message)
-        doc = SimpleNamespace(issue_id='ISU-0020', flags=SimpleNamespace(unicom_api=True), get_doc_before_save=lambda: SimpleNamespace(issue_id='ISU-0019'))
+        doc = SimpleNamespace(issue_id='ISU-0020', reference_doctype=None, reference_name=None, flags=SimpleNamespace(unicom_api=True),
+                              get_doc_before_save=lambda: SimpleNamespace(issue_id='ISU-0019', reference_doctype=None, reference_name=None))
         with patch.object(frappe, 'throw', side_effect=throw):
             with self.assertRaises(frappe.ValidationError): UniComIssue.before_insert(doc)
             with self.assertRaises(frappe.ValidationError): UniComIssue.validate(doc)

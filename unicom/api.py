@@ -117,6 +117,15 @@ def _set_users(doc, reason, users):
             doc.append('access', {'user': user, 'reason': reason})
 
 
+def _grant_mentions(doc, clean_html):
+    # Only explicit, nonempty mention nodes retained by sanitization grant access.
+    parsed = BeautifulSoup(clean_html, 'html.parser')
+    users = [node.get('data-id') for node in parsed.select('span[data-type="mention"][data-id]') if node.get_text(strip=True)]
+    for user in _users(users):
+        if not any(row.user == user and row.reason == 'Mention' for row in doc.access):
+            doc.append('access', {'user': user, 'reason': 'Mention'})
+
+
 def _snapshot(doc):
     return {'title': doc.title, 'description': doc.description, 'accountable_owner': doc.accountable_owner,
             'coordination_user': getattr(doc, 'coordination_user', None) or None, 'status': doc.status, 'next_action': doc.next_action, 'next_action_date': str(doc.next_action_date or ''),
@@ -271,6 +280,7 @@ def create_issue(title, accountable_owner, next_action='', next_action_date=None
     doc.update({'reference_doctype': reference_doctype, 'reference_name': reference_name, 'title': title, 'description': _rich_html(description or ''), 'accountable_owner': accountable_owner, 'coordination_user': _coordination_selection(coordination_user), 'status': 'Open', 'next_action': next_action, 'next_action_date': next_action_date})
     _set_users(doc, 'Participant', participants)
     _set_users(doc, 'Follow-up', follow_up_assignees)
+    _grant_mentions(doc, doc.description)
     _validate(doc)
     _event(doc, 'Created')
     doc.flags.unicom_api = True
@@ -298,7 +308,9 @@ def update_issue(name, values):
         if key == 'participants': _set_users(doc, 'Participant', val)
         elif key == 'follow_up_assignees': _set_users(doc, 'Follow-up', val)
         elif key == 'coordination_user': doc.coordination_user = _coordination_selection(val, current=getattr(doc, 'coordination_user', None))
-        elif key == 'description' and (val or '') != (doc.description or ''): doc.description = _rich_html(val or '', doc)
+        elif key == 'description' and (val or '') != (doc.description or ''):
+            doc.description = _rich_html(val or '', doc)
+            _grant_mentions(doc, doc.description)
         elif key != 'description': doc.set(key, val)
     _validate(doc)
     kind = 'Resolved' if before['status'] != 'Resolved' and doc.status == 'Resolved' else 'Reopened' if before['status'] == 'Resolved' and doc.status != 'Resolved' else 'Updated'
@@ -347,12 +359,7 @@ def add_comment(name, body, reply_to=None):
     text = parsed.get_text().replace('\u200b', '').replace('\ufeff', '').strip()
     if not text and not parsed.find('img'):
         frappe.throw(_('A comment is required'))
-    # Only mentions actually present in the retained editor content grant access.
-    mention_nodes = parsed.select('span[data-type="mention"][data-id]')
-    mentioned_users = [node.get('data-id') for node in mention_nodes if node.get_text(strip=True)]
-    for user in _users(mentioned_users):
-        if not any(row.user == user and row.reason == 'Mention' for row in doc.access):
-            doc.append('access', {'user': user, 'reason': 'Mention'})
+    _grant_mentions(doc, clean_body)
     _validate(doc)
     _event(doc, 'Comment', body=clean_body, reply_to=reply_to or None)
     doc.flags.unicom_api = True
