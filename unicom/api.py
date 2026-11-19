@@ -224,6 +224,14 @@ def source_issue(reference_doctype, reference_name):
     return {'exists': True}
 
 
+def _can_delegate_schedule(doc, user):
+    return user == 'Administrator' or user in (doc.owner, doc.accountable_owner)
+
+
+def _schedule_author_eligible(doc, user):
+    return user != 'Guest' and bool(frappe.db.exists('User', {'name': user, 'enabled': 1})) and issue_permission(doc, user=user, ptype='read')
+
+
 def _output(doc):
     result = doc.as_dict()
     source_doctype = result.pop('reference_doctype', None)
@@ -234,10 +242,13 @@ def _output(doc):
     result['attachments'] = [{'name': row.name, 'file_name': row.file_name, 'file_url': '/api/method/unicom.api.download_attachment?' + urlencode({'name': doc.name, 'attachment': row.name}), 'creation': row.uploaded_at} for row in doc.attachments]
     profile_users = {doc.owner, doc.accountable_owner, getattr(doc, 'coordination_user', None)}
     profile_users.update(event.actor for event in doc.timeline if event.actor)
+    profile_users.update(getattr(event, 'scheduled_for', None) for event in doc.timeline)
     profile_users.discard(None)
     profile_users.discard('')
     # This document was already checked for access. Only its referenced people are exposed.
     result['user_profiles'] = frappe.get_all('User', filters={'name': ['in', sorted(profile_users)]}, fields=['name', 'full_name', 'user_image'], limit_page_length=0) if profile_users else []
+    candidates = sorted({event.actor for event in doc.timeline if event.kind == 'Comment' and event.actor != 'Guest' and issue_permission(doc, user=event.actor, ptype='read')}) if _can_delegate_schedule(doc, frappe.session.user) else []
+    result['schedule_eligible_authors'] = frappe.get_all('User', filters={'name': ['in', candidates], 'enabled': 1}, pluck='name', limit_page_length=0) if candidates else []
     return result
 
 
@@ -409,19 +420,23 @@ def schedule_event(name, schedule_type, scheduled_date, title, contact='', sched
             frappe.throw(_('Invalid scheduled time'))
     if type(set_follow_up) not in (bool, int) or set_follow_up not in (0, 1):
         frappe.throw(_('Invalid follow-up selection'))
+    scheduled_for = _user()
     if source_comment:
         source = next((event for event in doc.timeline if event.name == source_comment), None)
-        if not source or source.kind != 'Comment' or source.actor != _user():
+        if not source or source.kind != 'Comment' or (source.actor != _user() and not _can_delegate_schedule(doc, _user())):
             frappe.throw(_('Invalid source comment'))
+        scheduled_for = source.actor
         if any(event.kind == 'Scheduled' and getattr(event, 'source_comment', None) == source_comment for event in doc.timeline):
             frappe.throw(_('This comment already has a scheduled event'))
+    if not _schedule_author_eligible(doc, scheduled_for):
+        frappe.throw(_('The comment author cannot currently access this issue'), frappe.PermissionError)
     before = _snapshot(doc)
     if set_follow_up:
         doc.next_action, doc.next_action_date = title.strip(), scheduled_date
     _validate(doc)
     _event(doc, 'Scheduled', before, schedule_type=schedule_type, follow_up_date=scheduled_date,
            follow_up_action=title.strip(), contact=contact.strip(), scheduled_time=scheduled_time or None,
-           source_comment=source_comment or None)
+           source_comment=source_comment or None, scheduled_for=scheduled_for)
     doc.flags.unicom_api = True
     doc.save(ignore_permissions=True)
     return _output(doc)
@@ -431,7 +446,7 @@ def schedule_event(name, schedule_type, scheduled_date, title, contact='', sched
 def complete_scheduled_event(name, event_name):
     doc = _doc(name, lock=True)
     event = next((row for row in doc.timeline if row.name == event_name), None)
-    if not event or event.kind != 'Scheduled' or event.actor != _user():
+    if not event or event.kind != 'Scheduled' or (getattr(event, 'scheduled_for', None) or event.actor) != _user():
         frappe.throw(_('Not permitted'), frappe.PermissionError)
     if getattr(event, 'completed_at', None):
         return _output(doc)
@@ -454,7 +469,7 @@ def today_schedule():
         FROM `tabUniCom Issue Event` e
         INNER JOIN `tabUniCom Issue` ON `tabUniCom Issue`.name = e.parent
         WHERE e.parenttype = 'UniCom Issue' AND e.parentfield = 'timeline'
-        AND e.kind = 'Scheduled' AND e.actor = %s AND e.follow_up_date = %s
+        AND e.kind = 'Scheduled' AND COALESCE(NULLIF(e.scheduled_for, ''), e.actor) = %s AND e.follow_up_date = %s
         AND e.completed_at IS NULL AND `tabUniCom Issue`.status IN ('Open','In Progress','Waiting')
         """ + (' AND (' + permission + ')' if permission else '') + """
         ORDER BY e.scheduled_time IS NULL, e.scheduled_time, e.recorded_at, e.name""", (user, day), as_dict=True)

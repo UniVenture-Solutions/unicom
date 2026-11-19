@@ -55,7 +55,7 @@ class ScheduledEventTests(unittest.TestCase):
     def test_invalid_source_and_unreadable_issue_rejected(self):
         for event in (None,SimpleNamespace(name='source',kind='Comment',actor='other'),SimpleNamespace(name='source',kind='Communication',actor='owner')):
             self.doc.timeline=[event] if event else []
-            with self.assertRaises(ValueError):self.schedule(source_comment='source')
+            with self.assertRaises((ValueError,frappe.PermissionError)):self.schedule(source_comment='source')
         self.session.user='outsider'
         with self.assertRaises(frappe.PermissionError):self.schedule()
         self.assertFalse(self.doc.saved)
@@ -75,7 +75,7 @@ class ScheduledEventTests(unittest.TestCase):
             self.assertEqual(event.completed_at,first)
             self.assertEqual(save.call_count,1)
         self.assertEqual(len(self.doc.timeline),1)
-        event.actor='other'
+        event.scheduled_for='other'
         with self.assertRaises(frappe.PermissionError):api.complete_scheduled_event('issue','scheduled')
 
     def test_today_query_is_site_date_actor_active_readable_and_incomplete(self):
@@ -85,8 +85,59 @@ class ScheduledEventTests(unittest.TestCase):
         permission.assert_called_once_with('owner')
         query,args=sql.call_args.args
         self.assertEqual(args,('owner','2026-11-19'))
-        for condition in ("e.kind = 'Scheduled'",'e.actor = %s','e.follow_up_date = %s','e.completed_at IS NULL',"status IN ('Open','In Progress','Waiting')",'readable_only',"e.parentfield = 'timeline'"):
+        for condition in ("e.kind = 'Scheduled'","COALESCE(NULLIF(e.scheduled_for, ''), e.actor) = %s",'e.follow_up_date = %s','e.completed_at IS NULL',"status IN ('Open','In Progress','Waiting')",'readable_only',"e.parentfield = 'timeline'"):
             self.assertIn(condition,query)
         self.assertEqual(output['date'],'2026-11-19')
         self.assertEqual(output['items'][0]['scheduled_date'],'2026-11-19')
         self.assertEqual(output['items'][0]['scheduled_time'],'09:00:00')
+
+    def test_creator_owner_and_admin_can_confirm_for_readable_enabled_author(self):
+        for confirmer in ('creator','owner','Administrator'):
+            with self.subTest(confirmer=confirmer):
+                self.session.user=confirmer
+                source=SimpleNamespace(name='comment',kind='Comment',actor='mentioned',body='meeting will be scheduled on saturday',recorded_at='2026-11-18 10:00:00')
+                self.doc.timeline=[source]
+                self.doc.access=[SimpleNamespace(user='mentioned',reason='Participant')]
+                self.schedule(source_comment='comment')
+                event=self.doc.timeline[-1]
+                self.assertEqual((event.actor,event.scheduled_for),(confirmer,'mentioned'))
+                self.assertEqual((source.actor,source.recorded_at),('mentioned','2026-11-18 10:00:00'))
+                self.assertEqual(len(self.doc.access),1)
+                event.name='scheduled'
+                with self.assertRaises(ValueError):self.schedule(source_comment='comment')
+
+    def test_regular_participant_cannot_delegate_but_can_schedule_own_comment(self):
+        self.session.user='mentioned'
+        self.doc.access=[SimpleNamespace(user='mentioned',reason='Participant')]
+        source=SimpleNamespace(name='comment',kind='Comment',actor='owner')
+        self.doc.timeline=[source]
+        with self.assertRaises(ValueError):self.schedule(source_comment='comment')
+        source.actor='mentioned'
+        self.schedule(source_comment='comment')
+        self.assertEqual(self.doc.timeline[-1].scheduled_for,'mentioned')
+
+    def test_delegation_rejects_inactive_or_no_longer_readable_author(self):
+        self.doc.timeline=[SimpleNamespace(name='comment',kind='Comment',actor='mentioned')]
+        with self.assertRaises(frappe.PermissionError):self.schedule(source_comment='comment')
+        self.doc.access=[SimpleNamespace(user='mentioned',reason='Participant')]
+        with patch.object(frappe.db,'exists',return_value=False),self.assertRaises(frappe.PermissionError):self.schedule(source_comment='comment')
+        self.assertFalse(self.doc.saved)
+
+    def test_delegated_event_completion_uses_recipient_and_rechecks_issue_access(self):
+        self.doc.timeline=[SimpleNamespace(name='comment',kind='Comment',actor='mentioned')]
+        self.doc.access=[SimpleNamespace(user='mentioned',reason='Participant')]
+        self.schedule(source_comment='comment')
+        event=self.doc.timeline[-1];event.name='scheduled'
+        with self.assertRaises(frappe.PermissionError):api.complete_scheduled_event('issue','scheduled')
+        self.session.user='mentioned'
+        self.doc.access=[]
+        with self.assertRaises(frappe.PermissionError):api.complete_scheduled_event('issue','scheduled')
+        self.doc.access=[SimpleNamespace(user='mentioned',reason='Participant')]
+        api.complete_scheduled_event('issue','scheduled')
+        self.assertTrue(event.completed_at)
+        self.assertEqual(event.actor,'owner')
+
+    def test_legacy_schedule_falls_back_to_actor_for_completion(self):
+        self.doc.timeline=[SimpleNamespace(name='legacy',kind='Scheduled',actor='owner')]
+        api.complete_scheduled_event('issue','legacy')
+        self.assertTrue(self.doc.timeline[0].completed_at)

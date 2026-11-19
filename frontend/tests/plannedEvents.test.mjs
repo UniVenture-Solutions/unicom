@@ -22,3 +22,11 @@ assert.deepEqual(savedPlannedEventPrompts(issue,'',dismissals,x=>x,'2026-11-19')
 const completed={...source,body:'I called Mohsin, he will visit Saturday'}
 assert.ok(savedCommunicationPrompts({...issue,timeline:[completed,{kind:'Scheduled',source_comment:'comment'}]},'me',dismissals,x=>x,'2026-11-19').comment,'scheduled log does not suppress completed communication suggestion')
 console.log('planned event detection checks passed')
+
+const importedComment={name:'source',kind:'Comment',actor:'waseem',body:'meeting will be scheduled on saturday',recorded_at:'2026-11-18 10:00:00'}
+const delegated={name:'imported',status:'Open',owner:'nasir',accountable_owner:'owner',schedule_eligible_authors:['waseem'],timeline:[importedComment]}
+assert.equal(savedPlannedEventPrompts(delegated,'nasir',dismissals,x=>x,'2026-11-19').source.title,'Meeting','creator sees exact imported screenshot comment')
+assert.ok(savedPlannedEventPrompts(delegated,'owner',dismissals,x=>x,'2026-11-19').source,'accountable owner can review other author')
+assert.ok(savedPlannedEventPrompts(delegated,'Administrator',dismissals,x=>x,'2026-11-19').source,'Admin can review eligible author')
+assert.deepEqual(savedPlannedEventPrompts(delegated,'participant',dismissals,x=>x,'2026-11-19'),{},'ordinary participant cannot delegate')
+assert.deepEqual(savedPlannedEventPrompts({...delegated,schedule_eligible_authors:[]},'nasir',dismissals,x=>x,'2026-11-19'),{},'disabled or access-revoked author not suggested')

@@ -46,6 +46,7 @@ const communicationPrompts=ref({})
 const communicationDismissals=createCommunicationDismissals(()=>window.localStorage)
 const plannedPrompts=ref({})
 const plannedDismissals=createCommunicationDismissals(()=>window.localStorage,'planned-events')
+const scheduledFor=ref('')
 const showSchedule=ref(false), scheduleSaving=ref(false), scheduleError=ref(''), suggestedScheduleDate=ref('')
 const schedule=reactive({schedule_type:'Meeting',title:'',contact:'',scheduled_date:'',scheduled_time:'',source_comment:null,set_follow_up:false})
 watch(()=>issue.value?.name,()=>{plannedPrompts.value={};showSchedule.value=false},{flush:'sync'})
@@ -335,6 +336,7 @@ async function openSchedule(commentName=null){
     schedule_type:hint?.schedule_type || 'Meeting',title,contact,scheduled_date:'',scheduled_time:hint?.scheduled_time || '',
     source_comment:commentName,set_follow_up:false,
   })
+  scheduledFor.value=commentName ? issue.value.timeline.find(event=>event.name===commentName)?.actor || currentUser.value : currentUser.value
   suggestedScheduleDate.value=hint?.scheduled_date || ''
   scheduleError.value=''
   showSchedule.value=true
@@ -621,9 +623,9 @@ onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notif
                       <Badge v-if="thread.event.completed_at" theme="green">Done</Badge>
                     </div>
                     <p class="mt-1 text-sm text-gray-600">{{[formatSiteTime(thread.event.follow_up_date),scheduledTimeLabel(thread.event.scheduled_time),thread.event.contact && !thread.event.follow_up_action?.includes(thread.event.contact) ? thread.event.contact : ''].filter(Boolean).join(' · ')}}</p>
-                    <p class="mt-1 text-xs text-gray-600">Scheduled by {{authorName(thread.event.actor)}}</p>
+                    <p class="mt-1 text-xs text-gray-600">Scheduled by {{authorName(thread.event.actor)}}<span v-if="thread.event.scheduled_for && thread.event.scheduled_for!==thread.event.actor"> · Scheduled for {{authorName(thread.event.scheduled_for)}}</span></p>
                   </div>
-                  <Button v-if="thread.event.actor===currentUser && !thread.event.completed_at && issue.status!=='Resolved'" size="sm" variant="subtle" icon-left="check"
+                  <Button v-if="(thread.event.scheduled_for || thread.event.actor)===currentUser && !thread.event.completed_at && issue.status!=='Resolved'" size="sm" variant="subtle" icon-left="check"
                     :loading="completingEvent===thread.event.name" :disabled="!!completingEvent || busy || hasPendingImages" @click="completeScheduledEvent(issue.name,thread.event.name)">Mark done</Button>
                 </div>
                 <a v-if="thread.event.source_comment" class="mt-2 inline-block text-xs text-blue-600 hover:underline" :href="'#comment-'+thread.event.source_comment"
@@ -656,6 +658,7 @@ onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notif
 <Dialog v-model="showSchedule" :disable-outside-click-to-close="scheduleSaving" :options="{title:'Schedule event',size:'lg'}">
   <template #body-content>
     <form id="schedule-event-form" class="space-y-3" @submit.prevent="saveSchedule">
+      <p class="text-sm text-gray-600">Scheduled for {{authorName(scheduledFor)}}</p>
       <FormControl v-model="schedule.schedule_type" type="select" label="Event type" :options="['Meeting','Follow-up']"/>
       <FormControl v-model="schedule.title" label="Event title" maxlength="140" required/>
       <FormControl v-model="schedule.contact" label="Contact (optional)" maxlength="140"/>

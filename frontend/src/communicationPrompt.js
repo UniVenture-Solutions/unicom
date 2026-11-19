@@ -82,9 +82,11 @@ export function plannedMeetingHint(text,recordedAt,currentDate='') {
 
 export function savedPlannedEventPrompts(issue,user,dismissals,visibleText,currentDate) {
   if(!user || user==='Guest' || !['Open','In Progress','Waiting'].includes(issue?.status))return {}
+  const canDelegate=user==='Administrator' || user===issue.owner || user===issue.accountable_owner
+  const eligible=new Set(issue.schedule_eligible_authors || [])
   const linked=new Set(issue.timeline.filter(event=>event.kind==='Scheduled').map(event=>event.source_comment).filter(Boolean)), prompts={}
   for(const event of issue.timeline){
-    if(event.kind!=='Comment' || event.actor!==user || linked.has(event.name) || dismissals.has(user,issue.name,event.name))continue
+    if(event.kind!=='Comment' || (event.actor!==user && !(canDelegate && eligible.has(event.actor))) || linked.has(event.name) || dismissals.has(user,issue.name,event.name))continue
     const hint=plannedMeetingHint(visibleText(event.body),event.recorded_at,currentDate)
     if(hint)prompts[event.name]=hint
   }

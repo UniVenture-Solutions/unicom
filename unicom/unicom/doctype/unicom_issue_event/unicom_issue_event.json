@@ -18,7 +18,8 @@
     "follow_up_date",
     "schedule_type",
     "scheduled_time",
-    "completed_at"
+    "completed_at",
+    "scheduled_for"
   ],
   "fields": [
     {
@@ -108,6 +109,13 @@
       "fieldname": "completed_at",
       "label": "Completed at",
       "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "scheduled_for",
+      "label": "Scheduled for",
+      "fieldtype": "Link",
+      "options": "User",
       "read_only": 1
     }
   ],
