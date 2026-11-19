@@ -1,12 +1,20 @@
 <script setup>
-import { createCommunicationDismissals, savedCommunicationPrompts } from './communicationPrompt'
+import { createCommunicationDismissals, savedCommunicationPrompts, savedPlannedEventPrompts } from './communicationPrompt'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { Button, FormControl, Dialog, TextEditor, Badge, Avatar, FeatherIcon, ListView, ListFooter, FileUploader, ErrorMessage, Breadcrumbs, Dropdown, Popover, Switch } from 'frappe-ui'
+import PlannedEventSuggestion from './PlannedEventSuggestion.vue'
 
 const view=ref('mine'), rows=ref([]), issue=ref(null), people=ref([]), error=ref(''), busy=ref(false), page=ref(0), search=ref(''), filter=ref(''), showNew=ref(false), showLog=ref(false), showEdit=ref(false)
 const currentUser=ref(''), sidebarCollapsed=ref(false), pageLength=ref(20), detailsOpen=ref(true), attachmentsOpen=ref(true)
 const showDashboard=ref(true), today=ref(new Date())
-const todayLabel=computed(()=>new Intl.DateTimeFormat(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric'}).format(today.value))
+const dashboardDate=ref(''), todaySchedule=ref([]), todayScheduleLoading=ref(false), todayScheduleError=ref('')
+const completingEvent=ref('')
+const todayLabel=computed(()=>{
+  const date=dashboardDate.value ? new Date(dashboardDate.value+'T12:00:00Z') : today.value
+  return new Intl.DateTimeFormat(undefined,{
+    weekday:'long',year:'numeric',month:'long',day:'numeric',...(dashboardDate.value ? {timeZone:'UTC'} : {}),
+  }).format(date)
+})
 const notificationsOpen=ref(false), notificationRows=ref([]), notificationCount=ref(0), notificationHasMore=ref(false), notificationNext=ref(0), notificationLoading=ref(false), notificationOpening=ref(false), notificationError=ref('')
 let notificationTimer=null
 const detailGrid=ref(null), detailGridWidth=ref(0), detailViewport=ref(window.innerWidth), detailPreferred=ref(null)
@@ -26,7 +34,7 @@ watch(detailGrid, element=>{detailObserver?.disconnect();detailObserver=null;if(
 const assignDraft=ref([]), assignError=ref(''), assignSaving=ref(false), assignContext=ref(0), assignOpen=ref(false), assignQuery=ref(''), assignSearchOpen=ref(false)
 let assignSavePromise=null
 const showResolve=ref(false), resolutionNote=ref(''), resolveError=ref('')
-const timelineCategories=['Comments','Communications','Notes','Activity']
+const timelineCategories=['Comments','Communications','Notes','Events','Activity']
 const timelineSelection=ref(new Set(timelineCategories))
 const inlineField=ref(''), inlineValue=ref(''), inlineError=ref(''), inlineEditor=ref(null), inlineKey=ref(0)
 const inlineRegion=ref(null), inlineSaving=ref(false), inlineDeferred=ref(false)
@@ -36,6 +44,11 @@ const hasPendingImages=computed(()=>Object.values(pendingImages).some(Boolean))
 const richMenu=[['Paragraph','Heading 2','Heading 3','Heading 4'],'Separator','Bold','Italic','Separator','Bullet List','Numbered List','Separator','Align Left','Align Center','Align Right','FontColor','Separator','Link','Blockquote','Code','Horizontal Rule',['InsertTable','AddColumnBefore','AddColumnAfter','DeleteColumn','AddRowBefore','AddRowAfter','DeleteRow','MergeCells','SplitCell','ToggleHeaderColumn','ToggleHeaderRow','ToggleHeaderCell','DeleteTable']]
 const communicationPrompts=ref({})
 const communicationDismissals=createCommunicationDismissals(()=>window.localStorage)
+const plannedPrompts=ref({})
+const plannedDismissals=createCommunicationDismissals(()=>window.localStorage,'planned-events')
+const showSchedule=ref(false), scheduleSaving=ref(false), scheduleError=ref(''), suggestedScheduleDate=ref('')
+const schedule=reactive({schedule_type:'Meeting',title:'',contact:'',scheduled_date:'',scheduled_time:'',source_comment:null,set_follow_up:false})
+watch(()=>issue.value?.name,()=>{plannedPrompts.value={};showSchedule.value=false},{flush:'sync'})
 watch([()=>issue.value,currentUser,today],refreshCommunicationPrompts)
 const commentBody=ref(''), commentError=ref(''), commentEditorKey=ref(0)
 const commentEditor=ref(null), replyEditor=ref(null)
@@ -50,7 +63,7 @@ const safeCommentError = computed(() => { const el=document.createElement('div')
 const safeReplyError = computed(() => { const el=document.createElement('div'); el.textContent=replyError.value; return el.innerHTML })
 const timelineThreads = computed(() => { const events=issue.value?.timeline || []; const replies=new Map(); for(const event of events) if(event.reply_to){if(!replies.has(event.reply_to)) replies.set(event.reply_to,[]); replies.get(event.reply_to).push(event)} return events.filter(event=>!event.reply_to).reverse().map(event=>({event,replies:replies.get(event.name)||[]})) })
 const allTimelineSelected=computed(()=>timelineSelection.value.size===timelineCategories.length)
-function timelineCategory(event){if(event.kind==='Comment')return 'Comments';if(event.kind==='Communication')return event.channel==='Internal Note'?'Notes':'Communications';return 'Activity'}
+function timelineCategory(event){if(event.kind==='Comment')return 'Comments';if(event.kind==='Communication')return event.channel==='Internal Note'?'Notes':'Communications';if(event.kind==='Scheduled')return 'Events';return 'Activity'}
 const filteredThreads=computed(()=>timelineThreads.value.filter(thread=>timelineSelection.value.has(timelineCategory(thread.event))))
 const hiddenReplyDraft=computed(()=>!!replyRoot.value && !filteredThreads.value.some(thread=>thread.event.name===replyRoot.value))
 function selectAllTimeline(){if(!hasPendingImages.value)timelineSelection.value=new Set(timelineCategories)}
@@ -69,6 +82,7 @@ const assignmentOptions=computed(()=>{
 const filteredAssignmentOptions=computed(()=>{const q=assignQuery.value.trim().toLowerCase();const matches=assignmentOptions.value.filter(option=>!q || option.label.toLowerCase().includes(q) || option.value.toLowerCase().includes(q));const selected=matches.filter(option=>assignDraft.value.includes(option.value));const others=matches.filter(option=>!assignDraft.value.includes(option.value));return [...selected,...others.slice(0,Math.max(0,50-selected.length))]})
 const safeAssignError=computed(()=>{const el=document.createElement('div');el.textContent=assignError.value;return el.innerHTML})
 const safeResolveError=computed(()=>{const el=document.createElement('div');el.textContent=resolveError.value;return el.innerHTML})
+const safeScheduleError=computed(()=>{const el=document.createElement('div');el.textContent=scheduleError.value;return el.innerHTML})
 const mentionOptions=computed(()=>people.value.map(p=>({value:p.name,label:p.full_name})))
 const followup=ref(''), editParticipant=ref(''), editFollowup=ref('')
 function add(list, value){if(value && !list.includes(value)) list.push(value)}
@@ -83,6 +97,44 @@ async function api(method, data={}, post=false){
   const res=await fetch(url,opts), result=await res.json(); if(!res.ok){let msg=result.exception || 'Request failed'; try { const m=JSON.parse(result._server_messages || '[]'); if(m.length) msg=JSON.parse(m[0]).message } catch {} throw new Error(msg)} return result.message
 }
 async function run(fn){busy.value=true; error.value=''; try{await fn()}catch(e){error.value=e.message}finally{busy.value=false}}
+async function refreshTodaySchedule(){
+  if(!showDashboard.value || issue.value || todayScheduleLoading.value || completingEvent.value)return
+  todayScheduleLoading.value=true
+  todayScheduleError.value=''
+  try{
+    const result=await api('today_schedule')
+    if(!Array.isArray(result?.items) || !/^\d{4}-\d{2}-\d{2}$/.test(result.date))throw new Error('Invalid schedule response')
+    dashboardDate.value=result.date
+    todaySchedule.value=result.items
+  }catch(_){
+    todayScheduleError.value='Could not load today’s schedule.'
+    todaySchedule.value=[]
+    dashboardDate.value=''
+  }finally{todayScheduleLoading.value=false}
+}
+async function openTodayEvent(row){
+  await open(row.issue_name)
+  if(issue.value?.name===row.issue_name)await jumpToSource(row.name)
+}
+function scheduledTimeLabel(time){
+  const match=String(time||'').match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/)
+  if(!match)return ''
+  return new Intl.DateTimeFormat(undefined,{hour:'numeric',minute:'2-digit',timeZone:'UTC'})
+    .format(new Date(Date.UTC(2000,0,1,Number(match[1]),Number(match[2]))))
+}
+async function completeScheduledEvent(name,eventName){
+  if(busy.value || hasPendingImages.value || completingEvent.value || todayScheduleLoading.value)return
+  if(inlineField.value && !await saveInline())return
+  if(busy.value || completingEvent.value)return
+  completingEvent.value=eventName
+  await run(async()=>{
+    const updated=await api('complete_scheduled_event',{name,event_name:eventName},true)
+    if(issue.value?.name===name)issue.value=updated
+    todaySchedule.value=todaySchedule.value.filter(row=>row.name!==eventName)
+  })
+  completingEvent.value=''
+  refreshTodaySchedule()
+}
 async function refreshNotifications(reset=true){
   if(notificationLoading.value || notificationOpening.value)return
   notificationLoading.value=true;notificationError.value=''
@@ -94,7 +146,7 @@ async function refreshNotifications(reset=true){
   }catch(_){notificationError.value='Could not load notifications. Please try again.'}
   finally{notificationLoading.value=false}
 }
-function notificationFocus(){if(!document.hidden){today.value=new Date();if(!notificationOpening.value)refreshNotifications()}}
+function notificationFocus(){if(!document.hidden){today.value=new Date();if(!notificationOpening.value)refreshNotifications();refreshTodaySchedule()}}
 function toggleNotifications(togglePopover){if(notificationsOpen.value){togglePopover(false);return}togglePopover(true);refreshNotifications()}
 async function openNotification(row){
   if(notificationOpening.value)return
@@ -116,8 +168,8 @@ async function open(name,push=true,skipGuard=false){if(!skipGuard && issue.value
 function listRoute(v){return '/unicom?view='+encodeURIComponent(v)}
 function currentRoute(){return issue.value?'/unicom/'+encodeURIComponent(issue.value.name):showDashboard.value?'/unicom':listRoute(view.value)}
 function locationView(){const name=decodeURIComponent(location.pathname.replace(/^\/unicom\/?/,''));const requested=new URLSearchParams(location.search).get('view');return name?{name}:['mine','overdue','all'].includes(requested)?{view:requested}:{dashboard:true}}
-async function applyLocation(){const target=locationView();if(target.name){await open(target.name,false,true);return}issue.value=null;error.value='';page.value=0;showDashboard.value=!!target.dashboard;if(target.view){view.value=target.view;await load()}}
-async function goDashboard(){if(!await canLeaveInline())return;issue.value=null;showDashboard.value=true;today.value=new Date();error.value='';history.pushState({},'','/unicom')}
+async function applyLocation(){const target=locationView();if(target.name){await open(target.name,false,true);return}issue.value=null;error.value='';page.value=0;showDashboard.value=!!target.dashboard;if(target.view){view.value=target.view;await load()}else refreshTodaySchedule()}
+async function goDashboard(){if(!await canLeaveInline())return;issue.value=null;showDashboard.value=true;today.value=new Date();error.value='';history.pushState({},'','/unicom');refreshTodaySchedule()}
 async function goList(v){if(!await canLeaveInline())return;view.value=v;showDashboard.value=false;issue.value=null;page.value=0;history.pushState({},'',listRoute(v));load()}
 function resetForm(){Object.assign(form,blank())}
 async function create(){if(!await canLeaveInline())return;await run(async()=>{const doc=await api('create_issue',form,true);showNew.value=false;resetForm();showDashboard.value=false;issue.value=doc;history.pushState({},'','/unicom/'+encodeURIComponent(doc.name))})}
@@ -253,12 +305,64 @@ async function saveComment(){
 }
 function refreshCommunicationPrompts(){
   const currentDate=[today.value.getFullYear(),String(today.value.getMonth()+1).padStart(2,'0'),String(today.value.getDate()).padStart(2,'0')].join('-')
-  communicationPrompts.value=savedCommunicationPrompts(issue.value,currentUser.value,communicationDismissals,body=>new DOMParser().parseFromString(body||'','text/html').body.textContent,currentDate)
+  const visibleText=body=>new DOMParser().parseFromString(body||'','text/html').body.textContent
+  communicationPrompts.value=savedCommunicationPrompts(issue.value,currentUser.value,communicationDismissals,visibleText,currentDate)
+  plannedPrompts.value=savedPlannedEventPrompts(issue.value,currentUser.value,plannedDismissals,visibleText,currentDate)
 }
 function dismissCommunication(name){
   if(!issue.value || !currentUser.value)return
   communicationDismissals.add(currentUser.value,issue.value.name,name)
   refreshCommunicationPrompts()
+}
+function dismissPlannedEvent(commentName){
+  if(!issue.value || !currentUser.value)return
+  plannedDismissals.add(currentUser.value,issue.value.name,commentName)
+  refreshCommunicationPrompts()
+}
+async function openSchedule(commentName=null){
+  const name=issue.value?.name
+  if(!name || issue.value.status==='Resolved' || hasPendingImages.value)return
+  if(assignSavePromise && !await assignSavePromise)return
+  if(assignmentDirty.value || (inlineField.value && !await saveInline()))return
+  if(issue.value?.name!==name || issue.value.status==='Resolved' || busy.value)return
+  const hint=commentName ? plannedPrompts.value[commentName] : null
+  if(commentName && !hint)return
+  const coordinator=hint?.schedule_type==='Meeting' && issue.value.coordination_user
+  const contact=hint?.contact || (coordinator ? authorName(coordinator) : '')
+  let title=hint?.title || ''
+  if(hint?.schedule_type==='Meeting' && !hint.contact && contact && (!title || title==='Meeting'))title='Meeting with '+contact
+  Object.assign(schedule,{
+    schedule_type:hint?.schedule_type || 'Meeting',title,contact,scheduled_date:'',scheduled_time:hint?.scheduled_time || '',
+    source_comment:commentName,set_follow_up:false,
+  })
+  suggestedScheduleDate.value=hint?.scheduled_date || ''
+  scheduleError.value=''
+  showSchedule.value=true
+}
+async function saveSchedule(){
+  if(!issue.value || busy.value || scheduleSaving.value)return
+  if(!schedule.title.trim() || !schedule.scheduled_date){
+    scheduleError.value='Enter an event title and confirm the date.'
+    return
+  }
+  const name=issue.value.name
+  busy.value=true
+  scheduleSaving.value=true
+  scheduleError.value=''
+  try{
+    const updated=await api('schedule_event',{name,...schedule},true)
+    if(issue.value?.name===name){
+      issue.value=updated
+      timelineSelection.value=new Set([...timelineSelection.value,'Events'])
+      showSchedule.value=false
+    }
+    if(showDashboard.value && !issue.value)refreshTodaySchedule()
+  }catch(e){
+    if(issue.value?.name===name)scheduleError.value=e.message
+  }finally{
+    busy.value=false
+    scheduleSaving.value=false
+  }
 }
 async function jumpToSource(name){
   if(hasPendingImages.value)return
@@ -404,7 +508,7 @@ function changes(event){try{const data=JSON.parse(event.changes||'{}');return Ob
 
 
 onBeforeUnmount(()=>{clearInterval(notificationTimer);window.removeEventListener('focus',notificationFocus);document.removeEventListener('visibilitychange',notificationFocus);detailObserver?.disconnect();window.removeEventListener('resize',updateDetailViewport);for(const controller of pasteControllers.values())controller.abort();pasteControllers.clear();pendingImageTargets.clear();for(const key of Object.keys(pendingImages))delete pendingImages[key];document.removeEventListener('pointerdown',inlineInteraction,true);document.removeEventListener('focusin',inlineInteraction,true);document.removeEventListener('focusout',onInlineFocusOut,true)})
-onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notificationFocus);document.addEventListener('visibilitychange',notificationFocus);notificationTimer=setInterval(()=>{if(!document.hidden){today.value=new Date();if(!notificationsOpen.value)refreshNotifications()}},30000);try{const saved=Number(localStorage.getItem(detailStorageKey));if(Number.isFinite(saved) && saved>=detailMin && saved<=detailMax)detailPreferred.value=saved}catch(_){}window.addEventListener('resize',updateDetailViewport);document.addEventListener('pointerdown',inlineInteraction,true);document.addEventListener('focusin',inlineInteraction,true);document.addEventListener('focusout',onInlineFocusOut,true);fetch('/api/method/frappe.auth.get_logged_user',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(r=>{currentUser.value=r?.message||''}).catch(()=>{});await run(async()=>{people.value=await api('users');await applyLocation()});window.onpopstate=async()=>{if(!await canLeaveInline()){history.pushState({},'',currentRoute());return}await applyLocation()};window.addEventListener('beforeunload',event=>{if(inlineField.value && inlineValue.value!==(issue.value?.[inlineField.value]||'')){event.preventDefault();event.returnValue=''}})})
+onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notificationFocus);document.addEventListener('visibilitychange',notificationFocus);notificationTimer=setInterval(()=>{if(!document.hidden){today.value=new Date();if(!notificationsOpen.value)refreshNotifications();refreshTodaySchedule()}},30000);try{const saved=Number(localStorage.getItem(detailStorageKey));if(Number.isFinite(saved) && saved>=detailMin && saved<=detailMax)detailPreferred.value=saved}catch(_){}window.addEventListener('resize',updateDetailViewport);document.addEventListener('pointerdown',inlineInteraction,true);document.addEventListener('focusin',inlineInteraction,true);document.addEventListener('focusout',onInlineFocusOut,true);fetch('/api/method/frappe.auth.get_logged_user',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(r=>{currentUser.value=r?.message||''}).catch(()=>{});await run(async()=>{people.value=await api('users');await applyLocation()});window.onpopstate=async()=>{if(!await canLeaveInline()){history.pushState({},'',currentRoute());return}await applyLocation()};window.addEventListener('beforeunload',event=>{if(inlineField.value && inlineValue.value!==(issue.value?.[inlineField.value]||'')){event.preventDefault();event.returnValue=''}})})
 </script>
 <template>
 <div class="h-screen overflow-hidden flex flex-col md:flex-row">
@@ -434,12 +538,28 @@ onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notif
       <div class="mx-auto max-w-5xl space-y-6">
         <div><h1 class="text-2xl font-semibold">Dashboard</h1></div>
         <section aria-labelledby="dashboard-today" class="rounded-lg border border-gray-200 bg-white p-5 sm:p-6">
-          <div class="flex flex-wrap items-start justify-between gap-4"><div><h2 id="dashboard-today" class="flex items-center gap-2 text-lg font-semibold"><FeatherIcon name="calendar" class="h-5 w-5 text-gray-500"/>Today</h2><p class="mt-2 text-sm text-gray-500">{{todayLabel}}</p></div><Button variant="subtle" icon-right="arrow-right" @click="goList('mine')">View my issues</Button></div>
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 id="dashboard-today" class="flex items-center gap-2 text-lg font-semibold"><FeatherIcon name="calendar" class="h-5 w-5 text-gray-500"/>Today</h2>
+              <p class="mt-2 text-sm text-gray-500">{{todayLabel}}</p>
+            </div>
+            <Button variant="subtle" icon-right="arrow-right" @click="goList('mine')">View my issues</Button>
+          </div>
+          <div v-if="todayScheduleError" role="alert" class="mt-4 flex items-center gap-2 text-sm">
+            <span>{{todayScheduleError}}</span><Button size="sm" @click="refreshTodaySchedule">Retry</Button>
+          </div>
+          <p v-else-if="todayScheduleLoading && !dashboardDate" role="status" class="mt-5 text-sm text-gray-500">Loading today’s events…</p>
+          <p v-else-if="!todaySchedule.length" class="mt-5 text-sm text-gray-500">No meetings or follow-ups scheduled today.</p>
+          <ul v-else class="mt-4 divide-y divide-gray-200">
+            <li v-for="event in todaySchedule" :key="event.name" class="flex flex-wrap items-center justify-between gap-3 py-3">
+              <button type="button" :disabled="busy || !!completingEvent" class="min-w-0 flex-1 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500" @click="openTodayEvent(event)">
+                <span class="flex flex-wrap items-center gap-2"><span class="break-words font-medium text-gray-900 hover:underline">{{event.title}}</span><Badge theme="gray">{{event.schedule_type}}</Badge></span>
+                <span class="mt-1 block text-sm text-gray-600">{{[scheduledTimeLabel(event.scheduled_time),event.contact && !event.title.includes(event.contact) ? event.contact : '',event.issue_id,event.issue_title].filter(Boolean).join(' · ')}}</span>
+              </button>
+              <Button size="sm" variant="subtle" icon-left="check" :loading="completingEvent===event.name" :disabled="!!completingEvent || todayScheduleLoading || busy" :aria-label="'Mark '+event.title+' done'" @click="completeScheduledEvent(event.issue_name,event.name)">Mark done</Button>
+            </li>
+          </ul>
         </section>
-        <div class="grid gap-6 md:grid-cols-2">
-          <section aria-labelledby="dashboard-tasks" class="rounded-lg border border-gray-200 bg-white p-5 sm:p-6"><div class="flex items-center justify-between gap-3"><h2 id="dashboard-tasks" class="flex items-center gap-2 text-lg font-semibold"><FeatherIcon name="check-square" class="h-5 w-5 text-gray-500"/>Tasks</h2><Badge theme="gray">Coming soon</Badge></div><div class="flex min-h-44 flex-col items-center justify-center py-8 text-center"><FeatherIcon name="check-square" class="mb-3 h-8 w-8 text-gray-400"/><p class="text-sm text-gray-500">Task tracking is coming soon.</p></div></section>
-          <section aria-labelledby="dashboard-activity" class="rounded-lg border border-gray-200 bg-white p-5 sm:p-6"><div class="flex flex-wrap items-center justify-between gap-3"><h2 id="dashboard-activity" class="flex items-center gap-2 text-lg font-semibold"><FeatherIcon name="activity" class="h-5 w-5 text-gray-500"/>Activity</h2><Button icon-left="plus" disabled title="Activity logging is coming soon" aria-describedby="activity-coming-soon">Log activity</Button></div><div class="flex min-h-44 flex-col items-center justify-center py-8 text-center"><FeatherIcon name="activity" class="mb-3 h-8 w-8 text-gray-400"/><p id="activity-coming-soon" class="text-sm font-medium text-gray-700">Activity logging is coming soon.</p></div></section>
-        </div>
       </div>
     </div>
     <template v-else-if="!issue">
@@ -453,7 +573,9 @@ onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notif
       <div ref="detailGrid" class="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_var(--issue-details-width)] lg:grid-rows-[auto_1fr]" :style="{'--issue-details-width':detailWidth+'px'}">
         <div class="order-1 w-full min-w-0 max-w-4xl mx-auto p-6 flex flex-wrap justify-between gap-4 items-start"><div class="min-w-0 flex-1 basis-64"><div v-if="inlineField==='title'" ref="inlineRegion" class="space-y-2"><FormControl v-model="inlineValue" label="Title" @keydown.enter="saveInline" @keydown.esc="cancelInline"/><ErrorMessage :message="safeInlineError"/><Button v-if="inlineError" size="sm" @click="saveInline">Retry</Button></div><h1 v-else class="text-2xl font-semibold break-words"><Button variant="ghost" class="!h-auto !p-0 !text-2xl" aria-label="Edit title" @click="startInline('title')">{{issue.title}}</Button></h1><p class="text-sm text-gray-500 mt-2">{{issue.issue_id || issue.name}} · Created by {{authorName(issue.owner)}}</p></div></div>
         <section class="order-3 lg:order-2 w-full min-w-0 max-w-4xl mx-auto px-6 pb-6 space-y-6 break-words"><div><h2 class="font-semibold mb-2">Description</h2><div v-if="inlineField==='description'" ref="inlineRegion" class="space-y-2"><div id="description-editor-label" class="text-sm">Edit description</div><FileUploader v-for="uploadKey in [issue.name+':description:'+inlineKey]" :key="uploadKey" file-types="image/png,image/jpeg,image/gif,image/webp" :upload-args="{upload_endpoint:'/api/method/unicom.api.upload_image',docname:issue.name,private:true}" :validate-file="f=>validateImage(f,uploadKey)" @success="file=>insertImage(file,inlineEditor,'description',uploadKey)" @failure="imageUploadFailed(uploadKey,'description')"><template #default="{openFileSelector,uploading,error:uploadError}"><TextEditor :ref="setInlineEditor" class="rich-editor" :content="inlineValue" :fixed-menu="richMenu" :mentions="mentionOptions" placeholder="Write a description; type @ to mention someone" @change="value=>inlineValue=value"><template #bottom><div class="editor-image-action"><Button size="sm" variant="ghost" icon="image" label="Attach image" title="Attach image" :loading="uploading" :disabled="busy || uploading || hasPendingImages" @click="beginImageUpload(openFileSelector,inlineEditor,'description',uploadKey)"/></div></template></TextEditor><ErrorMessage :message="uploadError"/><ErrorMessage :message="safeInlineError"/><Button v-if="inlineError" size="sm" @click="saveInline">Retry</Button></template></FileUploader></div><div v-else><div class="prose prose-sm max-w-none text-gray-700" role="button" tabindex="0" aria-label="Edit description" @click="editDescription" @keydown.enter="editDescription" @keydown.space="editDescription" v-html="issue.description || '—'"></div></div></div><div>
-          <div class="flex flex-wrap items-center justify-between gap-2 mb-4"><h2 class="font-semibold">Timeline</h2><div role="group" aria-label="Filter timeline" class="flex flex-wrap gap-1"><Button size="sm" :variant="allTimelineSelected?'subtle':'ghost'" :aria-pressed="allTimelineSelected" :disabled="hasPendingImages" @click="selectAllTimeline">All</Button><Button v-for="category in timelineCategories" :key="category" size="sm" :variant="!allTimelineSelected && timelineSelection.has(category)?'subtle':'ghost'" :aria-pressed="!allTimelineSelected && timelineSelection.has(category)" :disabled="hasPendingImages" @click="toggleTimelineCategory(category)">{{category}}</Button></div></div><div class="mb-4 flex justify-end"><Dropdown :options="channels.map(channel=>({label:channel,onClick:()=>logIssue(channel)}))"><Button variant="solid" class="whitespace-nowrap" :disabled="(busy &amp;&amp; !inlineSaving) || issue.status==='Resolved'">Log communication<template #suffix><FeatherIcon name="chevron-down" class="h-4 w-4"/></template></Button></Dropdown></div>
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-4"><h2 class="font-semibold">Timeline</h2><div role="group" aria-label="Filter timeline" class="flex flex-wrap gap-1"><Button size="sm" :variant="allTimelineSelected?'subtle':'ghost'" :aria-pressed="allTimelineSelected" :disabled="hasPendingImages" @click="selectAllTimeline">All</Button><Button v-for="category in timelineCategories" :key="category" size="sm" :variant="!allTimelineSelected && timelineSelection.has(category)?'subtle':'ghost'" :aria-pressed="!allTimelineSelected && timelineSelection.has(category)" :disabled="hasPendingImages" @click="toggleTimelineCategory(category)">{{category}}</Button></div></div><div class="mb-4 flex flex-wrap justify-end gap-2">
+            <Button variant="outline" icon-left="calendar" :disabled="busy || hasPendingImages || issue.status==='Resolved'" @click="openSchedule()">Schedule event</Button>
+            <Dropdown :options="channels.map(channel=>({label:channel,onClick:()=>logIssue(channel)}))"><Button variant="solid" class="whitespace-nowrap" :disabled="(busy &amp;&amp; !inlineSaving) || issue.status==='Resolved'">Log communication<template #suffix><FeatherIcon name="chevron-down" class="h-4 w-4"/></template></Button></Dropdown></div>
           <p v-if="hasPendingImages" role="status" class="mb-3 text-xs text-gray-600">Uploading image… Timeline filters will be available when the upload finishes.</p><div class="mb-8 rounded-lg border border-gray-200 p-3 space-y-2">
             <div id="comment-editor-label" class="text-xs font-medium text-gray-600">Add a comment</div><FileUploader v-for="uploadKey in [issue.name+':comment:'+commentEditorKey]" :key="uploadKey" file-types="image/png,image/jpeg,image/gif,image/webp" :upload-args="{upload_endpoint:'/api/method/unicom.api.upload_image',docname:issue.name,private:true}" :validate-file="f=>validateImage(f,uploadKey)" @success="file=>insertImage(file,commentEditor,'comment',uploadKey)" @failure="delete pendingImages[uploadKey]"><template #default="{openFileSelector,uploading,error:uploadError}"><div @keydown="submitShortcut($event)"><TextEditor :ref="setCommentEditor" :key="commentEditorKey" class="timeline-editor rich-editor" :content="commentBody" :fixed-menu="richMenu" :mentions="mentionOptions" placeholder="Write a comment; type @ to mention someone" @change="value=>commentBody=value"><template #bottom><div class="editor-image-action"><Button size="sm" variant="ghost" icon="image" label="Attach image" title="Attach image" :loading="uploading" :disabled="busy || uploading || hasPendingImages" @click="beginImageUpload(openFileSelector,commentEditor,'comment',uploadKey)"/></div></template></TextEditor></div><ErrorMessage :message="uploadError"/><ErrorMessage :message="safeCommentError"/><div class="flex justify-end"><Button variant="solid" :loading="busy" :disabled="busy || uploading || hasPendingImages" title="Post comment (Ctrl+Enter or Cmd+Enter)" @click="saveComment">Post comment</Button></div></template></FileUploader>
           </div>
@@ -469,6 +591,8 @@ onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notif
                   <p v-if="thread.event.contact" class="text-xs text-gray-500 mt-1">Contact: {{thread.event.contact}}</p>
                   <div v-if="thread.event.body" class="prose prose-sm max-w-none text-gray-800 mt-2" v-html="thread.event.body"></div>
                   <div v-if="communicationPrompts[thread.event.name] && issue.status!=='Resolved'" class="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm"><p>Log this conversation as a communication?</p><div class="mt-2 flex gap-2"><Button size="sm" :disabled="busy || hasPendingImages" @click="logFromComment(thread.event)">Review communication</Button><Button size="sm" variant="ghost" @click="dismissCommunication(thread.event.name)">Dismiss</Button></div></div>
+                  <PlannedEventSuggestion v-if="plannedPrompts[thread.event.name]" :schedule-type="plannedPrompts[thread.event.name].schedule_type"
+                    :disabled="busy || hasPendingImages" class="mt-3" @review="openSchedule(thread.event.name)" @dismiss="dismissPlannedEvent(thread.event.name)"/>
                   <a v-if="thread.event.source_comment" class="mt-2 block text-xs text-blue-600 hover:underline" :href="'#comment-'+thread.event.source_comment" @click.prevent="jumpToSource(thread.event.source_comment)">From original comment</a><p v-if="thread.event.follow_up_date || thread.event.follow_up_action" class="mt-1 text-xs text-gray-600">Communication follow-up: {{thread.event.follow_up_date}}<span v-if="thread.event.follow_up_action"> {{thread.event.follow_up_action}}</span></p>
                   <p v-for="change in changes(thread.event)" :key="change.label" class="text-xs text-gray-600 mt-1" :title="change.raw">{{change.label}}: {{change.text}}</p>
                   <div class="flex flex-wrap items-center gap-2 mt-2">
@@ -481,9 +605,30 @@ onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notif
                 </div></div>
                   <div v-if="thread.replies.length || replyRoot===thread.event.name" :id="'thread-'+thread.event.name" class="ml-6 sm:ml-[3.75rem] mr-4 mb-4 border-l-2 border-gray-200 pl-3 space-y-3">
                     <Button v-if="earlierReplyCount(thread)" variant="ghost" size="sm" @click="loadEarlierReplies(thread.event.name)">Load more replies ({{earlierReplyCount(thread)}} earlier)</Button>
-                    <div tabindex="-1" v-for="reply in visibleReplies(thread)" :id="'comment-'+reply.name" :key="reply.name" class="flex gap-2"><Avatar :key="reply.actor+userImage(reply.actor)" size="md" :label="authorName(reply.actor)" :image="userImage(reply.actor)"/><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-x-2"><span class="text-sm font-medium">{{authorName(reply.actor)}}</span><span class="text-xs text-gray-500" :title="'Recorded: '+reply.recorded_at">{{formatSiteTime(reply.recorded_at)}}</span></div><div class="prose prose-sm max-w-none text-gray-800 mt-1" v-html="reply.body"></div><div v-if="communicationPrompts[reply.name] && issue.status!=='Resolved'" class="mt-2 rounded border border-gray-200 bg-gray-50 p-2 text-sm"><p>Log this conversation as a communication?</p><Button size="sm" :disabled="busy || hasPendingImages" @click="logFromComment(reply)">Review communication</Button><Button size="sm" variant="ghost" @click="dismissCommunication(reply.name)">Dismiss</Button></div><Button variant="ghost" size="sm" class="mt-1" :disabled="busy || hasPendingImages || (replyRoot && replyRoot!==thread.event.name)" :aria-label="'Reply to '+authorName(reply.actor)+' in this thread'" @click="startReply(thread.event.name)">Reply<span class="sr-only"> to {{authorName(reply.actor)}} in this thread</span></Button></div></div>
+                    <div tabindex="-1" v-for="reply in visibleReplies(thread)" :id="'comment-'+reply.name" :key="reply.name" class="flex gap-2"><Avatar :key="reply.actor+userImage(reply.actor)" size="md" :label="authorName(reply.actor)" :image="userImage(reply.actor)"/><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-x-2"><span class="text-sm font-medium">{{authorName(reply.actor)}}</span><span class="text-xs text-gray-500" :title="'Recorded: '+reply.recorded_at">{{formatSiteTime(reply.recorded_at)}}</span></div><div class="prose prose-sm max-w-none text-gray-800 mt-1" v-html="reply.body"></div><div v-if="communicationPrompts[reply.name] && issue.status!=='Resolved'" class="mt-2 rounded border border-gray-200 bg-gray-50 p-2 text-sm"><p>Log this conversation as a communication?</p><Button size="sm" :disabled="busy || hasPendingImages" @click="logFromComment(reply)">Review communication</Button><Button size="sm" variant="ghost" @click="dismissCommunication(reply.name)">Dismiss</Button></div>
+                      <PlannedEventSuggestion v-if="plannedPrompts[reply.name]" :schedule-type="plannedPrompts[reply.name].schedule_type"
+                        :disabled="busy || hasPendingImages" class="mt-2" @review="openSchedule(reply.name)" @dismiss="dismissPlannedEvent(reply.name)"/>
+                      <Button variant="ghost" size="sm" class="mt-1" :disabled="busy || hasPendingImages || (replyRoot && replyRoot!==thread.event.name)" :aria-label="'Reply to '+authorName(reply.actor)+' in this thread'" @click="startReply(thread.event.name)">Reply<span class="sr-only"> to {{authorName(reply.actor)}} in this thread</span></Button></div></div>
                     <div v-if="replyRoot===thread.event.name" class="space-y-2"><div :id="'reply-editor-label-'+thread.event.name" class="text-xs font-medium text-gray-600">Reply in thread</div><FileUploader v-for="uploadKey in [issue.name+':reply:'+replyRoot+':'+replyEditorKey]" :key="uploadKey" file-types="image/png,image/jpeg,image/gif,image/webp" :upload-args="{upload_endpoint:'/api/method/unicom.api.upload_image',docname:issue.name,private:true}" :validate-file="f=>validateImage(f,uploadKey)" @success="file=>insertImage(file,replyEditor,'reply',uploadKey)" @failure="delete pendingImages[uploadKey]"><template #default="{openFileSelector,uploading,error:uploadError}"><div @keydown="submitShortcut($event,thread.event.name)"><TextEditor :ref="component=>setReplyEditor(component,thread.event.name)" :key="replyEditorKey" class="timeline-editor rich-editor" :content="replyBody" :fixed-menu="richMenu" :mentions="mentionOptions" placeholder="Write a reply; type @ to mention someone" @change="value=>replyBody=value"><template #bottom><div class="editor-image-action"><Button size="sm" variant="ghost" icon="image" label="Attach image" title="Attach image" :loading="uploading" :disabled="busy || uploading || hasPendingImages" @click="beginImageUpload(openFileSelector,replyEditor,'reply',uploadKey)"/></div></template></TextEditor></div><ErrorMessage :message="uploadError"/><ErrorMessage :message="safeReplyError"/><div class="flex justify-end gap-2"><Button :disabled="busy || uploading || hasPendingImages" @click="cancelReply">Cancel</Button><Button variant="solid" :loading="busy" :disabled="busy || uploading || hasPendingImages" title="Post reply (Ctrl+Enter or Cmd+Enter)" @click="saveReply(thread.event.name)">Post reply</Button></div></template></FileUploader></div>
                   </div>
+              </article>
+              <article v-else-if="thread.event.kind==='Scheduled'" :id="'comment-'+thread.event.name" tabindex="-1" class="rounded-lg border border-gray-200 bg-white p-4">
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <h3 class="break-words text-sm font-semibold">{{thread.event.follow_up_action}}</h3>
+                      <Badge theme="gray">{{thread.event.schedule_type}}</Badge>
+                      <Badge v-if="thread.event.completed_at" theme="green">Done</Badge>
+                    </div>
+                    <p class="mt-1 text-sm text-gray-600">{{[formatSiteTime(thread.event.follow_up_date),scheduledTimeLabel(thread.event.scheduled_time),thread.event.contact && !thread.event.follow_up_action?.includes(thread.event.contact) ? thread.event.contact : ''].filter(Boolean).join(' · ')}}</p>
+                    <p class="mt-1 text-xs text-gray-600">Scheduled by {{authorName(thread.event.actor)}}</p>
+                  </div>
+                  <Button v-if="thread.event.actor===currentUser && !thread.event.completed_at && issue.status!=='Resolved'" size="sm" variant="subtle" icon-left="check"
+                    :loading="completingEvent===thread.event.name" :disabled="!!completingEvent || busy || hasPendingImages" @click="completeScheduledEvent(issue.name,thread.event.name)">Mark done</Button>
+                </div>
+                <a v-if="thread.event.source_comment" class="mt-2 inline-block text-xs text-blue-600 hover:underline" :href="'#comment-'+thread.event.source_comment"
+                  @click.prevent="jumpToSource(thread.event.source_comment)">From original comment</a>
+                <p v-for="change in changes(thread.event)" :key="change.label" class="mt-1 text-xs text-gray-600" :title="change.raw">{{change.label}}: {{change.text}}</p>
               </article>
               <div v-else class="flex gap-3 rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-600">
                 <FeatherIcon name="activity" class="h-4 w-4 mt-0.5"/><div class="min-w-0"><div><span class="font-medium text-gray-700">{{authorName(thread.event.actor)}}</span> · {{thread.event.kind}} · <span :title="'Recorded: '+thread.event.recorded_at">{{formatSiteTime(thread.event.recorded_at)}}</span></div><div v-if="thread.event.happened_at" :title="'Happened: '+thread.event.happened_at">Happened {{formatSiteTime(thread.event.happened_at)}}</div><div v-if="thread.event.channel">{{thread.event.channel}}</div><div v-if="thread.event.contact">Contact: {{thread.event.contact}}</div><div v-if="thread.event.body" v-html="thread.event.body"></div><p v-for="change in changes(thread.event)" :key="change.label" class="mt-1" :title="change.raw">{{change.label}}: {{change.text}}</p></div>
@@ -508,4 +653,30 @@ onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notif
 <Dialog v-model="showEdit" :options="{title:'Edit issue',size:'2xl'}"><template #body-content><ErrorMessage v-if="error" class="mb-3" :message="safeError"/><div class="space-y-3"><FormControl v-model="edit.title" label="Title"/><div><label id="edit-description-label" class="text-sm">Description</label><TextEditor :ref="component=>labelEditor(component,null,'edit-description-label')" class="rich-editor" :content="edit.description" :fixed-menu="richMenu" :mentions="mentionOptions" placeholder="Write a description; type @ to mention someone" @change="value=>edit.description=value"/></div><FormControl v-model="edit.accountable_owner" type="select" label="Issue Owner" :options="userOptions"/><FormControl v-model="edit.coordination_user" type="select" label="Coordinating with" :options="editCoordinationOptions"/><FormControl v-model="edit.status" type="select" label="Status" :options="statuses"/><FormControl v-model="edit.next_action" label="Next action"/><FormControl v-model="edit.next_action_date" type="date" label="Next action date"/><FormControl v-model="edit.resolution_note" type="textarea" label="Resolution note (required to resolve)"/><div><div class="text-sm">Participants</div><FormControl v-model="editParticipant" type="select" :options="userOptions"/><Button @click="add(edit.participants,editParticipant);editParticipant=''">Add</Button><div v-for="u in edit.participants" :key="u" class="text-sm">{{u}} <Button variant="ghost" @click="edit.participants=edit.participants.filter(x=>x!==u)">Remove</Button></div></div><div><div class="text-sm">Follow-up assignees</div><FormControl v-model="editFollowup" type="select" :options="userOptions"/><Button @click="add(edit.follow_up_assignees,editFollowup);editFollowup=''">Add</Button><div v-for="u in edit.follow_up_assignees" :key="u" class="text-sm">{{u}} <Button variant="ghost" @click="edit.follow_up_assignees=edit.follow_up_assignees.filter(x=>x!==u)">Remove</Button></div></div></div></template><template #actions><Button variant="solid" :loading="busy" @click="saveEdit">Save</Button></template></Dialog>
 <Dialog v-model="showResolve" :disable-outside-click-to-close="busy" :options="{title:'Resolve issue',size:'lg'}"><template #body-content><FormControl v-model="resolutionNote" type="textarea" label="Resolution note" required/><ErrorMessage :message="safeResolveError"/></template><template #actions><Button :disabled="busy" @click="showResolve=false">Cancel</Button><Button variant="solid" :loading="busy" :disabled="busy" @click="resolveIssue">Resolve</Button></template></Dialog>
 <Dialog v-model="showLog" :options="{title:'Log communication',size:'2xl'}"><template #body-content><ErrorMessage v-if="error" class="mb-3" :message="safeError"/><div class="space-y-3"><FormControl v-model="log.channel" type="select" label="Channel" :options="[{label:'Select channel',value:''},...channels]"/><p v-if="log.source_comment" class="text-sm text-gray-600">Confirm the channel and when this communication happened. The original comment stays unchanged.</p><FormControl v-model="log.happened_at" type="datetime-local" label="Happened at"/><FormControl v-model="log.contact" label="Contact / person"/><div><label class="text-sm">Outcome / body (type @ to mention a user)</label><TextEditor :content="log.body" :mentions="mentionOptions" @change="value=>log.body=value"/></div><p v-if="issue.next_action_date" class="text-sm text-gray-600">Current issue follow-up date: {{issue.next_action_date}}</p><FormControl v-model="log.next_action" label="Communication follow-up action (optional)"/><FormControl v-model="log.next_action_date" type="date" label="Communication follow-up date"/><label class="flex items-center gap-2 text-sm"><input v-model="log.set_follow_up" type="checkbox">Set as issue follow-up</label><p class="text-xs text-gray-600">Only updates the issue date when checked. The issue’s next action changes only when an action is entered.</p><FormControl v-model="log.resolution_note" type="textarea" label="Resolution note (optional; resolves issue)"/></div></template><template #actions><Button variant="solid" :loading="busy" @click="saveLog">Save communication</Button></template></Dialog>
+<Dialog v-model="showSchedule" :disable-outside-click-to-close="scheduleSaving" :options="{title:'Schedule event',size:'lg'}">
+  <template #body-content>
+    <form id="schedule-event-form" class="space-y-3" @submit.prevent="saveSchedule">
+      <FormControl v-model="schedule.schedule_type" type="select" label="Event type" :options="['Meeting','Follow-up']"/>
+      <FormControl v-model="schedule.title" label="Event title" maxlength="140" required/>
+      <FormControl v-model="schedule.contact" label="Contact (optional)" maxlength="140"/>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <FormControl v-model="schedule.scheduled_date" type="date" label="Event date" required/>
+        <FormControl v-model="schedule.scheduled_time" type="time" label="Time (optional)"/>
+      </div>
+      <div v-if="suggestedScheduleDate" class="flex flex-wrap items-center gap-2 text-sm text-gray-600">
+        <span>Suggested date: {{formatSiteTime(suggestedScheduleDate)}}</span>
+        <Button type="button" size="sm" @click="schedule.scheduled_date=suggestedScheduleDate">Use suggested date</Button>
+      </div>
+      <p v-if="schedule.source_comment && schedule.schedule_type==='Meeting'" class="text-xs text-gray-600">Confirm when the meeting will take place. The comment may refer to when it will be arranged.</p>
+      <p v-if="issue?.next_action_date" class="text-sm text-gray-600">Current issue next action date: {{formatSiteTime(issue.next_action_date)}}</p>
+      <label class="flex items-center gap-2 text-sm"><input v-model="schedule.set_follow_up" type="checkbox">Set as issue follow-up</label>
+      <p class="text-xs text-gray-600">Checking this also updates the issue’s next action and date when you save.</p>
+      <ErrorMessage v-if="scheduleError" :message="safeScheduleError"/>
+    </form>
+  </template>
+  <template #actions>
+    <Button type="button" :disabled="scheduleSaving" @click="showSchedule=false">Cancel</Button>
+    <Button type="submit" form="schedule-event-form" variant="solid" :loading="scheduleSaving" :disabled="busy || scheduleSaving">Confirm and schedule</Button>
+  </template>
+</Dialog>
 </template>
