@@ -144,6 +144,7 @@
 /* Add a source-linked issue from any saved Desk form. Server validation is authoritative. */
 ;(() => {
   if (!window.frappe || !window.jQuery) return
+  const hasManagementAccess = () => (frappe.user_roles || frappe.boot?.user?.roles || []).includes('Management')
   $(document).on('form-refresh.unicom', (_event, frm) => {
     if (!hasManagementAccess()) return
     if (!frm.doc || !frm.meta || frm.is_new() || frm.meta.istable || frm.meta.issingle || frm.doctype.startsWith('UniCom ')) return
