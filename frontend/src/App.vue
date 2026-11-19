@@ -1,5 +1,5 @@
 <script setup>
-import { communicationHint, followUpHint } from './communicationPrompt'
+import { createCommunicationDismissals, savedCommunicationPrompts } from './communicationPrompt'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { Button, FormControl, Dialog, TextEditor, Badge, Avatar, FeatherIcon, ListView, ListFooter, FileUploader, ErrorMessage, Breadcrumbs, Dropdown, Popover, Switch } from 'frappe-ui'
 
@@ -35,6 +35,8 @@ const pendingImages=reactive({})
 const hasPendingImages=computed(()=>Object.values(pendingImages).some(Boolean))
 const richMenu=[['Paragraph','Heading 2','Heading 3','Heading 4'],'Separator','Bold','Italic','Separator','Bullet List','Numbered List','Separator','Align Left','Align Center','Align Right','FontColor','Separator','Link','Blockquote','Code','Horizontal Rule',['InsertTable','AddColumnBefore','AddColumnAfter','DeleteColumn','AddRowBefore','AddRowAfter','DeleteRow','MergeCells','SplitCell','ToggleHeaderColumn','ToggleHeaderRow','ToggleHeaderCell','DeleteTable']]
 const communicationPrompts=ref({})
+const communicationDismissals=createCommunicationDismissals(()=>window.localStorage)
+watch([()=>issue.value,currentUser,today],refreshCommunicationPrompts)
 const commentBody=ref(''), commentError=ref(''), commentEditorKey=ref(0)
 const commentEditor=ref(null), replyEditor=ref(null)
 const replyRoot=ref(null), replyBody=ref(''), replyError=ref(''), replyEditorKey=ref(0), replyWindowSizes=ref({})
@@ -244,17 +246,19 @@ function submitShortcut(event,root=null){
 async function saveComment(){
   if(busy.value || hasPendingImages.value) return
   busy.value=true; commentError.value=''
-  const name=issue.value.name, previous=new Set(issue.value.timeline.map(event=>event.name))
-  try { const updated=await api('add_comment',{name,body:commentBody.value},true); if(issue.value?.name===name){issue.value=updated;suggestCommunication(updated,previous);commentBody.value='';commentEditorKey.value++} }
+  const name=issue.value.name
+  try { const updated=await api('add_comment',{name,body:commentBody.value},true); if(issue.value?.name===name){issue.value=updated;commentBody.value='';commentEditorKey.value++} }
   catch(e){if(issue.value?.name===name) commentError.value=e.message}
   finally{busy.value=false}
 }
-function suggestCommunication(updated,previous){
-  const posted=updated.timeline.filter(event=>!previous.has(event.name) && event.kind==='Comment' && event.actor===currentUser.value)
-  if(posted.length!==1)return
-  const event=posted[0], dom=new DOMParser().parseFromString(event.body,'text/html')
-  const text=dom.body.textContent, hint=communicationHint(text)
-  if(hint && !updated.timeline.some(row=>row.source_comment===event.name))communicationPrompts.value[event.name]={...hint,followUpDate:followUpHint(text,event.recorded_at)}
+function refreshCommunicationPrompts(){
+  const currentDate=[today.value.getFullYear(),String(today.value.getMonth()+1).padStart(2,'0'),String(today.value.getDate()).padStart(2,'0')].join('-')
+  communicationPrompts.value=savedCommunicationPrompts(issue.value,currentUser.value,communicationDismissals,body=>new DOMParser().parseFromString(body||'','text/html').body.textContent,currentDate)
+}
+function dismissCommunication(name){
+  if(!issue.value || !currentUser.value)return
+  communicationDismissals.add(currentUser.value,issue.value.name,name)
+  refreshCommunicationPrompts()
 }
 async function jumpToSource(name){
   if(hasPendingImages.value)return
@@ -363,8 +367,8 @@ function cancelReply(){replyRoot.value=null;replyBody.value='';replyError.value=
 async function saveReply(root){
   if(busy.value || hasPendingImages.value || replyRoot.value!==root) return
   busy.value=true; replyError.value=''
-  const name=issue.value.name, previous=new Set(issue.value.timeline.map(event=>event.name))
-  try { const updated=await api('add_comment',{name,body:replyBody.value,reply_to:root},true); if(issue.value?.name===name && replyRoot.value===root){issue.value=updated;suggestCommunication(updated,previous);cancelReply()} }
+  const name=issue.value.name
+  try { const updated=await api('add_comment',{name,body:replyBody.value,reply_to:root},true); if(issue.value?.name===name && replyRoot.value===root){issue.value=updated;cancelReply()} }
   catch(e){if(issue.value?.name===name && replyRoot.value===root) replyError.value=e.message}
   finally{busy.value=false}
 }
@@ -464,7 +468,7 @@ onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notif
                   <div v-if="thread.event.happened_at" class="mt-1 text-xs text-gray-500" :title="'Happened: '+thread.event.happened_at">Happened {{formatSiteTime(thread.event.happened_at)}}</div>
                   <p v-if="thread.event.contact" class="text-xs text-gray-500 mt-1">Contact: {{thread.event.contact}}</p>
                   <div v-if="thread.event.body" class="prose prose-sm max-w-none text-gray-800 mt-2" v-html="thread.event.body"></div>
-                  <div v-if="communicationPrompts[thread.event.name] && issue.status!=='Resolved'" class="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm"><p>Log this conversation as a communication?</p><div class="mt-2 flex gap-2"><Button size="sm" :disabled="busy || hasPendingImages" @click="logFromComment(thread.event)">Review communication</Button><Button size="sm" variant="ghost" @click="delete communicationPrompts[thread.event.name]">Dismiss</Button></div></div>
+                  <div v-if="communicationPrompts[thread.event.name] && issue.status!=='Resolved'" class="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm"><p>Log this conversation as a communication?</p><div class="mt-2 flex gap-2"><Button size="sm" :disabled="busy || hasPendingImages" @click="logFromComment(thread.event)">Review communication</Button><Button size="sm" variant="ghost" @click="dismissCommunication(thread.event.name)">Dismiss</Button></div></div>
                   <a v-if="thread.event.source_comment" class="mt-2 block text-xs text-blue-600 hover:underline" :href="'#comment-'+thread.event.source_comment" @click.prevent="jumpToSource(thread.event.source_comment)">From original comment</a><p v-if="thread.event.follow_up_date || thread.event.follow_up_action" class="mt-1 text-xs text-gray-600">Communication follow-up: {{thread.event.follow_up_date}}<span v-if="thread.event.follow_up_action"> {{thread.event.follow_up_action}}</span></p>
                   <p v-for="change in changes(thread.event)" :key="change.label" class="text-xs text-gray-600 mt-1" :title="change.raw">{{change.label}}: {{change.text}}</p>
                   <div class="flex flex-wrap items-center gap-2 mt-2">
@@ -477,7 +481,7 @@ onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notif
                 </div></div>
                   <div v-if="thread.replies.length || replyRoot===thread.event.name" :id="'thread-'+thread.event.name" class="ml-6 sm:ml-[3.75rem] mr-4 mb-4 border-l-2 border-gray-200 pl-3 space-y-3">
                     <Button v-if="earlierReplyCount(thread)" variant="ghost" size="sm" @click="loadEarlierReplies(thread.event.name)">Load more replies ({{earlierReplyCount(thread)}} earlier)</Button>
-                    <div tabindex="-1" v-for="reply in visibleReplies(thread)" :id="'comment-'+reply.name" :key="reply.name" class="flex gap-2"><Avatar :key="reply.actor+userImage(reply.actor)" size="md" :label="authorName(reply.actor)" :image="userImage(reply.actor)"/><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-x-2"><span class="text-sm font-medium">{{authorName(reply.actor)}}</span><span class="text-xs text-gray-500" :title="'Recorded: '+reply.recorded_at">{{formatSiteTime(reply.recorded_at)}}</span></div><div class="prose prose-sm max-w-none text-gray-800 mt-1" v-html="reply.body"></div><div v-if="communicationPrompts[reply.name] && issue.status!=='Resolved'" class="mt-2 rounded border border-gray-200 bg-gray-50 p-2 text-sm"><p>Log this conversation as a communication?</p><Button size="sm" :disabled="busy || hasPendingImages" @click="logFromComment(reply)">Review communication</Button><Button size="sm" variant="ghost" @click="delete communicationPrompts[reply.name]">Dismiss</Button></div><Button variant="ghost" size="sm" class="mt-1" :disabled="busy || hasPendingImages || (replyRoot && replyRoot!==thread.event.name)" :aria-label="'Reply to '+authorName(reply.actor)+' in this thread'" @click="startReply(thread.event.name)">Reply<span class="sr-only"> to {{authorName(reply.actor)}} in this thread</span></Button></div></div>
+                    <div tabindex="-1" v-for="reply in visibleReplies(thread)" :id="'comment-'+reply.name" :key="reply.name" class="flex gap-2"><Avatar :key="reply.actor+userImage(reply.actor)" size="md" :label="authorName(reply.actor)" :image="userImage(reply.actor)"/><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-x-2"><span class="text-sm font-medium">{{authorName(reply.actor)}}</span><span class="text-xs text-gray-500" :title="'Recorded: '+reply.recorded_at">{{formatSiteTime(reply.recorded_at)}}</span></div><div class="prose prose-sm max-w-none text-gray-800 mt-1" v-html="reply.body"></div><div v-if="communicationPrompts[reply.name] && issue.status!=='Resolved'" class="mt-2 rounded border border-gray-200 bg-gray-50 p-2 text-sm"><p>Log this conversation as a communication?</p><Button size="sm" :disabled="busy || hasPendingImages" @click="logFromComment(reply)">Review communication</Button><Button size="sm" variant="ghost" @click="dismissCommunication(reply.name)">Dismiss</Button></div><Button variant="ghost" size="sm" class="mt-1" :disabled="busy || hasPendingImages || (replyRoot && replyRoot!==thread.event.name)" :aria-label="'Reply to '+authorName(reply.actor)+' in this thread'" @click="startReply(thread.event.name)">Reply<span class="sr-only"> to {{authorName(reply.actor)}} in this thread</span></Button></div></div>
                     <div v-if="replyRoot===thread.event.name" class="space-y-2"><div :id="'reply-editor-label-'+thread.event.name" class="text-xs font-medium text-gray-600">Reply in thread</div><FileUploader v-for="uploadKey in [issue.name+':reply:'+replyRoot+':'+replyEditorKey]" :key="uploadKey" file-types="image/png,image/jpeg,image/gif,image/webp" :upload-args="{upload_endpoint:'/api/method/unicom.api.upload_image',docname:issue.name,private:true}" :validate-file="f=>validateImage(f,uploadKey)" @success="file=>insertImage(file,replyEditor,'reply',uploadKey)" @failure="delete pendingImages[uploadKey]"><template #default="{openFileSelector,uploading,error:uploadError}"><div @keydown="submitShortcut($event,thread.event.name)"><TextEditor :ref="component=>setReplyEditor(component,thread.event.name)" :key="replyEditorKey" class="timeline-editor rich-editor" :content="replyBody" :fixed-menu="richMenu" :mentions="mentionOptions" placeholder="Write a reply; type @ to mention someone" @change="value=>replyBody=value"><template #bottom><div class="editor-image-action"><Button size="sm" variant="ghost" icon="image" label="Attach image" title="Attach image" :loading="uploading" :disabled="busy || uploading || hasPendingImages" @click="beginImageUpload(openFileSelector,replyEditor,'reply',uploadKey)"/></div></template></TextEditor></div><ErrorMessage :message="uploadError"/><ErrorMessage :message="safeReplyError"/><div class="flex justify-end gap-2"><Button :disabled="busy || uploading || hasPendingImages" @click="cancelReply">Cancel</Button><Button variant="solid" :loading="busy" :disabled="busy || uploading || hasPendingImages" title="Post reply (Ctrl+Enter or Cmd+Enter)" @click="saveReply(thread.event.name)">Post reply</Button></div></template></FileUploader></div>
                   </div>
               </article>

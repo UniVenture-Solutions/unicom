@@ -34,3 +34,34 @@ export function followUpHint(text, recordedAt) {
   date.setUTCDate(date.getUTCDate()+delta)
   return date.toISOString().slice(0,10)
 }
+
+export function createCommunicationDismissals(getStorage) {
+  const storageKey='unicom.communicationDismissals.v1', limit=200
+  let keys=[]
+  try {
+    const saved=JSON.parse(getStorage().getItem(storageKey) || '[]')
+    if(Array.isArray(saved))keys=saved.filter(key=>typeof key==='string' && key.length<=2048).slice(-limit)
+  } catch (_) { /* Storage can be disabled; keep dismissals in memory. */ }
+  const keyFor=(user,issue,comment)=>JSON.stringify([user,issue,comment])
+  return {
+    has:(user,issue,comment)=>keys.includes(keyFor(user,issue,comment)),
+    add(user,issue,comment){
+      const key=keyFor(user,issue,comment)
+      keys=[...keys.filter(value=>value!==key),key].slice(-limit)
+      try{getStorage().setItem(storageKey,JSON.stringify(keys))}catch(_){}
+    },
+  }
+}
+
+export function savedCommunicationPrompts(issue,user,dismissals,visibleText,currentDate) {
+  if(!user || user==='Guest' || !['Open','In Progress','Waiting'].includes(issue?.status))return {}
+  const linked=new Set(issue.timeline.map(event=>event.source_comment).filter(Boolean)), prompts={}
+  for(const event of [...issue.timeline].reverse()){
+    if(event.kind!=='Comment' || event.actor!==user || linked.has(event.name) || dismissals.has(user,issue.name,event.name))continue
+    const text=visibleText(event.body), hint=communicationHint(text)
+    if(!hint)continue
+    const date=followUpHint(text,event.recorded_at)
+    prompts[event.name]={...hint,followUpDate:date && date>=currentDate ? date : ''}
+  }
+  return prompts
+}
