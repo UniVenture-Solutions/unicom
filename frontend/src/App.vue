@@ -10,6 +10,7 @@ const view=ref('mine'), rows=ref([]), issue=ref(null), people=ref([]), error=ref
 const currentUser=ref(''), sidebarCollapsed=ref(false), pageLength=ref(20), detailsOpen=ref(true), attachmentsOpen=ref(true)
 const showDashboard=ref(true), today=ref(new Date())
 const dashboardDate=ref(''), todaySchedule=ref([]), todayScheduleLoading=ref(false), todayScheduleError=ref('')
+const receivables=ref(null), receivablesLoading=ref(false), receivablesError=ref('')
 const completingEvent=ref('')
 const todayLabel=computed(()=>{
   const date=dashboardDate.value ? new Date(dashboardDate.value+'T12:00:00Z') : today.value
@@ -100,6 +101,21 @@ async function api(method, data={}, post=false){
   const res=await fetch(url,opts), result=await res.json(); if(!res.ok){let msg=result.exception || 'Request failed'; try { const m=JSON.parse(result._server_messages || '[]'); if(m.length) msg=JSON.parse(m[0]).message } catch {} throw new Error(msg)} return result.message
 }
 async function run(fn){busy.value=true; error.value=''; try{await fn()}catch(e){error.value=e.message}finally{busy.value=false}}
+function receivableAmount(value){
+  const [whole,fraction]=String(value).split('.')
+  return whole.replace(/\B(?=(\d{3})+(?!\d))/g,',')+(fraction ? '.'+fraction : '')
+}
+async function refreshReceivables(){
+  if(!locationView().dashboard || !showDashboard.value || issue.value || receivablesLoading.value)return
+  receivablesLoading.value=true;receivablesError.value=''
+  try{
+    const result=await api('dashboard_receivables')
+    if(typeof result?.available!=='boolean')throw new Error('Invalid summary')
+    receivables.value=result
+  }catch(_){receivables.value=null;receivablesError.value='Could not load invoice summary.'}
+  finally{receivablesLoading.value=false}
+}
+watch([showDashboard,()=>issue.value?.name],()=>{if(showDashboard.value && !issue.value)refreshReceivables()})
 async function refreshTodaySchedule(){
   if(!showDashboard.value || issue.value || todayScheduleLoading.value || completingEvent.value)return
   todayScheduleLoading.value=true
@@ -149,7 +165,7 @@ async function refreshNotifications(reset=true){
   }catch(_){notificationError.value='Could not load notifications. Please try again.'}
   finally{notificationLoading.value=false}
 }
-function notificationFocus(){if(!document.hidden){today.value=new Date();if(!notificationOpening.value)refreshNotifications();refreshTodaySchedule()}}
+function notificationFocus(){if(!document.hidden){refreshReceivables();today.value=new Date();if(!notificationOpening.value)refreshNotifications();refreshTodaySchedule()}}
 function toggleNotifications(togglePopover){if(notificationsOpen.value){togglePopover(false);return}togglePopover(true);refreshNotifications()}
 async function openNotification(row){
   if(notificationOpening.value)return
@@ -171,7 +187,7 @@ async function open(name,push=true,skipGuard=false){if(!skipGuard && issue.value
 function listRoute(v){return '/unicom?view='+encodeURIComponent(v)}
 function currentRoute(){return issue.value?'/unicom/'+encodeURIComponent(issue.value.name):showDashboard.value?'/unicom':listRoute(view.value)}
 function locationView(){const name=decodeURIComponent(location.pathname.replace(/^\/unicom\/?/,''));const requested=new URLSearchParams(location.search).get('view');return name?{name}:['mine','overdue','all'].includes(requested)?{view:requested}:{dashboard:true}}
-async function applyLocation(){const target=locationView();if(target.name){await open(target.name,false,true);return}issue.value=null;error.value='';page.value=0;showDashboard.value=!!target.dashboard;if(target.view){view.value=target.view;await load()}else refreshTodaySchedule()}
+async function applyLocation(){const target=locationView();if(target.name){await open(target.name,false,true);return}issue.value=null;error.value='';page.value=0;showDashboard.value=!!target.dashboard;if(target.view){view.value=target.view;await load()}else {refreshTodaySchedule();refreshReceivables()}}
 async function goDashboard(){if(!await canLeaveInline())return;issue.value=null;showDashboard.value=true;today.value=new Date();error.value='';history.pushState({},'','/unicom');refreshTodaySchedule()}
 async function goList(v){if(!await canLeaveInline())return;view.value=v;showDashboard.value=false;issue.value=null;page.value=0;history.pushState({},'',listRoute(v));load()}
 function resetForm(){Object.assign(form,blank())}
@@ -541,6 +557,29 @@ onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notif
     <div v-if="showDashboard && !issue" class="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
       <div class="mx-auto max-w-5xl space-y-6">
         <div><h1 class="text-2xl font-semibold">Dashboard</h1></div>
+        <div aria-label="Invoice summary" class="grid gap-4 sm:grid-cols-2">
+          <section aria-labelledby="dashboard-overdue" class="rounded-lg border border-gray-200 bg-white p-5 sm:p-6">
+            <h2 id="dashboard-overdue" class="text-base font-medium">Overdue invoices</h2>
+            <p v-if="!receivables && !receivablesError" role="status" class="mt-3 text-sm text-gray-500">Loading…</p>
+            <p v-else-if="receivablesError" role="alert" class="mt-3 text-sm text-gray-600">{{receivablesError}} <Button size="sm" variant="ghost" @click="refreshReceivables">Retry</Button></p>
+            <p v-else-if="!receivables?.available" class="mt-3 text-sm text-gray-500">Unavailable with your current invoice access.</p>
+            <p v-else class="mt-3 text-2xl font-semibold tabular-nums">{{receivables.overdue_count}}</p>
+            <p class="mt-2 text-xs text-gray-500">Unpaid invoices posted 30+ days ago.</p>
+          </section>
+          <section aria-labelledby="dashboard-receivable" class="rounded-lg border border-gray-200 bg-white p-5 sm:p-6">
+            <h2 id="dashboard-receivable" class="text-base font-medium">Total receivable</h2>
+            <p v-if="!receivables && !receivablesError" role="status" class="mt-3 text-sm text-gray-500">Loading…</p>
+            <p v-else-if="receivablesError" class="mt-3 text-sm text-gray-600">{{receivablesError}}</p>
+            <p v-else-if="!receivables?.available" class="mt-3 text-sm text-gray-500">Unavailable with your current invoice access.</p>
+            <template v-else>
+              <ul v-if="receivables.receivables.length" class="mt-3 space-y-1"><li v-for="total in receivables.receivables" :key="total.currency" class="flex flex-wrap items-baseline gap-2"><span class="text-sm text-gray-600">{{total.currency}}</span><span class="text-2xl font-semibold tabular-nums">{{receivableAmount(total.amount)}}</span></li></ul>
+              <p v-else class="mt-3 text-sm text-gray-500">No receivables in the invoices you can access.</p>
+              <p v-if="receivables.omitted_currency_count" class="mt-2 text-xs text-gray-600">{{receivables.omitted_currency_count}} invoices omitted because their account currency is missing.</p>
+            </template>
+            <p class="mt-2 text-xs text-gray-500">Outstanding on submitted invoices through today, by currency.</p>
+          </section>
+        </div>
+        <p class="!mt-2 text-xs text-gray-500">Only invoices you can access; returns excluded.</p>
         <section aria-labelledby="dashboard-today" class="rounded-lg border border-gray-200 bg-white p-5 sm:p-6">
           <div class="flex flex-wrap items-start justify-between gap-4">
             <div>

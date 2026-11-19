@@ -565,3 +565,9 @@ def inline_image(name, attachment):
 @frappe.whitelist(methods=['POST'])
 def upload_image(docname):
     return upload_attachment(docname, image_only=True)
+
+
+@frappe.whitelist(methods=['GET'])
+def dashboard_receivables():
+    from unicom.dashboard import receivables_summary
+    return receivables_summary(_user())
