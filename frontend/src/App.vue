@@ -567,7 +567,7 @@ onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notif
             <p class="mt-2 text-xs text-gray-500">Unpaid invoices posted 30+ days ago.</p>
           </section>
           <section aria-labelledby="dashboard-receivable" class="rounded-lg border border-gray-200 bg-white p-5 sm:p-6">
-            <h2 id="dashboard-receivable" class="text-base font-medium">Total receivable</h2>
+            <h2 id="dashboard-receivable" class="text-base font-medium">Market Credit</h2>
             <p v-if="!receivables && !receivablesError" role="status" class="mt-3 text-sm text-gray-500">Loading…</p>
             <p v-else-if="receivablesError" class="mt-3 text-sm text-gray-600">{{receivablesError}}</p>
             <p v-else-if="!receivables?.available" class="mt-3 text-sm text-gray-500">Unavailable with your current invoice access.</p>
