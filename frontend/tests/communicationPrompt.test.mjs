@@ -7,6 +7,7 @@ assert.deepEqual(communicationHint('Called Mohsin, he will visit Saturday'),{cha
 assert.equal(communicationHint('Received an email from Mohsin, he confirmed').contact,'Mohsin')
 assert.equal(communicationHint('Emailed the customer').channel,'Email')
 assert.equal(communicationHint('Had a talk with Mohsin; will email the customer').channel,'')
+assert.equal(followUpHint('I spoke with Mohsin on Monday, he will call next week','2026-11-19'),'')
 assert.equal(followUpHint(example,'2026-11-19 10:00:00'),'2026-11-21')
 assert.equal(followUpHint('Will visit next Saturday','2026-11-19'),'')
 assert.equal(followUpHint('Will visit on Saturday','2026-11-21'),'')

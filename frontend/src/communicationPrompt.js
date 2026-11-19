@@ -14,7 +14,9 @@ export function communicationHint(text) {
 
 // Use the saved site's calendar date; no browser timezone conversion or inferred time.
 export function followUpHint(text, recordedAt) {
-  if (!/\b(?:will|visit|follow[ -]?up|next action|due)\b/i.test(text)) return ''
+  const followUp = String(text || '').match(/\b(?:will|follow[ -]?up|next action|due)\b([\s\S]*)/i)?.[1]
+  if (!followUp) return ''
+  text = followUp
   const dates = [...new Set(text.match(/\b\d{4}-\d{2}-\d{2}\b/g) || [])]
   const weekdays = [...new Set((text.match(/\b(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)\b/gi) || []).map(day=>day.toLowerCase()))]
   if (dates.length + weekdays.length !== 1) return ''
