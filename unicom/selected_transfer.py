@@ -122,6 +122,12 @@ def user_mapping(source, lock=False):
     for source_user in sorted(source['referenced_users'], key=lambda row: row['email'].lower()):
         email = source_user['email'].strip().lower()
         rows = frappe.db.sql('SELECT name,email,full_name,enabled,user_type FROM `tabUser` WHERE email=%s ORDER BY name' + (' FOR UPDATE' if lock else ''), (email,), as_dict=True)
+        # A source Administrator can denote a real person who also has a named
+        # destination login. Resolve only this exact, fully verified two-row pair.
+        if (source_user['name'] == 'Administrator' and len(rows) == 2
+                and {row.name for row in rows} == {'Administrator', email}
+                and all(row.email.strip().lower() == email and row.enabled and row.user_type == 'System User' for row in rows)):
+            rows = [row for row in rows if row.name == email]
         if len(rows) != 1 or rows[0].email.strip().lower() != email or not rows[0].enabled or rows[0].user_type != 'System User':
             raise ValueError('Destination account needs review: ' + source_user['full_name'])
         target = rows[0]
