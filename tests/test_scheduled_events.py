@@ -16,17 +16,23 @@ class ScheduledEventTests(unittest.TestCase):
         values.update(kwargs)
         return api.schedule_event(**values)
 
-    def test_manual_schedule_is_owned_and_default_does_not_change_issue(self):
+    def test_manual_schedule_is_owned_and_updates_date_only(self):
         self.schedule(contact='Customer',scheduled_time='09:30')
         event=self.doc.timeline[-1]
         self.assertEqual((event.kind,event.actor,event.follow_up_date,event.schedule_type),('Scheduled','owner','2026-11-21','Meeting'))
         self.assertEqual(event.scheduled_time,'09:30:00')
-        self.assertEqual((self.doc.next_action,self.doc.next_action_date),('Call back','2026-11-20'))
+        self.assertEqual((self.doc.next_action,self.doc.next_action_date),('Call back','2026-11-21'))
         api._notify_mentions.assert_not_called()
 
-    def test_confirmed_opt_in_updates_action_and_date(self):
+    def test_legacy_explicit_true_still_updates_action_and_date(self):
         self.schedule(set_follow_up=True)
         self.assertEqual((self.doc.next_action,self.doc.next_action_date),('Meet customer','2026-11-21'))
+
+    def test_explicit_false_updates_date_and_preserves_latest_action(self):
+        self.doc.next_action='Latest action set by another update'
+        self.schedule(set_follow_up=False)
+        self.assertEqual((self.doc.next_action,self.doc.next_action_date),('Latest action set by another update','2026-11-21'))
+        self.assertEqual(self.doc.timeline[-1].follow_up_action,'Meet customer')
 
     def test_invalid_required_values_do_not_save(self):
         for values in ({'title':''},{'title':' '*3},{'scheduled_date':''},{'scheduled_date':'2026-02-30'},
@@ -102,6 +108,8 @@ class ScheduledEventTests(unittest.TestCase):
                 event=self.doc.timeline[-1]
                 self.assertEqual((event.actor,event.scheduled_for),(confirmer,'mentioned'))
                 self.assertEqual((source.actor,source.recorded_at),('mentioned','2026-11-18 10:00:00'))
+                self.assertEqual(self.doc.next_action_date,'2026-11-21')
+                self.assertEqual(self.doc.next_action,'Call back')
                 self.assertEqual(len(self.doc.access),1)
                 event.name='scheduled'
                 with self.assertRaises(ValueError):self.schedule(source_comment='comment')

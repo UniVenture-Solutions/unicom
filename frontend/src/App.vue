@@ -669,8 +669,7 @@ onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notif
       <p v-if="suggestedScheduleDate" class="text-sm text-gray-600">Date suggested from the comment. Review or edit it before saving.</p>
       <p v-if="schedule.source_comment && schedule.schedule_type==='Meeting'" class="text-xs text-gray-600">Confirm when the meeting will take place. The comment may refer to when it will be arranged.</p>
       <p v-if="issue?.next_action_date" class="text-sm text-gray-600">Current issue next action date: {{formatSiteTime(issue.next_action_date)}}</p>
-      <label class="flex items-center gap-2 text-sm"><input v-model="schedule.set_follow_up" type="checkbox">Set as issue follow-up</label>
-      <p class="text-xs text-gray-600">Checking this also updates the issue’s next action and date when you save.</p>
+      <p class="text-xs text-gray-600">Confirming this event also sets the issue’s next action date to the event date.</p>
       <ErrorMessage v-if="scheduleError" :message="safeScheduleError"/>
     </form>
   </template>

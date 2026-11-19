@@ -431,8 +431,9 @@ def schedule_event(name, schedule_type, scheduled_date, title, contact='', sched
     if not _schedule_author_eligible(doc, scheduled_for):
         frappe.throw(_('The comment author cannot currently access this issue'), frappe.PermissionError)
     before = _snapshot(doc)
+    doc.next_action_date = scheduled_date
     if set_follow_up:
-        doc.next_action, doc.next_action_date = title.strip(), scheduled_date
+        doc.next_action = title.strip()
     _validate(doc)
     _event(doc, 'Scheduled', before, schedule_type=schedule_type, follow_up_date=scheduled_date,
            follow_up_action=title.strip(), contact=contact.strip(), scheduled_time=scheduled_time or None,
