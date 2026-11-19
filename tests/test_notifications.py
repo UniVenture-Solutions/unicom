@@ -28,7 +28,7 @@ class MentionNotificationTests(unittest.TestCase):
         self.logs = []
         self.session = SimpleNamespace(user='owner')
         self.db = SimpleNamespace(exists=lambda doctype, filters: filters['name'] in {'owner', 'mentioned', 'second', 'website'})
-        self.patches = [patch.object(frappe, 'session', self.session), patch.object(frappe, 'db', self.db),
+        self.patches = [patch.object(frappe, 'get_roles', side_effect=lambda user=None: ['Management'] if (user or frappe.session.user) in {'owner','mentioned','second','website','recipient','Administrator'} else []), patch.object(frappe, 'session', self.session), patch.object(frappe, 'db', self.db),
                         patch.object(frappe, 'new_doc', side_effect=self.new_doc), patch.object(frappe, 'get_doc', return_value=self.doc),
                         patch.object(frappe, 'throw', side_effect=self.throw), patch.object(api, '_output', side_effect=lambda doc: doc),
                         patch.object(api, 'now_datetime', return_value='2026-11-18 17:00:00'),
@@ -133,7 +133,7 @@ class NotificationInboxTests(unittest.TestCase):
     def setUp(self):
         self.session = SimpleNamespace(user='website')
         self.db = SimpleNamespace(count=Mock(return_value=2), exists=Mock(return_value=True), set_value=Mock())
-        self.patches = [patch.object(frappe, 'session', self.session), patch.object(frappe, 'db', self.db),
+        self.patches = [patch.object(frappe, 'get_roles', side_effect=lambda user=None: ['Management'] if (user or frappe.session.user) in {'owner','mentioned','second','website','recipient','Administrator'} else []), patch.object(frappe, 'session', self.session), patch.object(frappe, 'db', self.db),
                         patch.object(frappe, 'throw', side_effect=MentionNotificationTests.throw)]
         for item in self.patches:
             item.start()

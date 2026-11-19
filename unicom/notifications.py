@@ -4,6 +4,7 @@ from urllib.parse import quote
 
 import frappe
 from frappe import _
+from unicom.access import has_management_access, require_management_access
 from frappe.desk.doctype.notification_settings.notification_settings import is_notifications_enabled
 
 
@@ -11,7 +12,7 @@ def notify_mentions(doc, users, context):
     if not users:
         return
     actor = frappe.session.user
-    recipients = [user for user in dict.fromkeys(users) if user != actor]
+    recipients = [user for user in dict.fromkeys(users) if user != actor and has_management_access(user)]
     if not recipients:
         return
     subjects = {
@@ -38,6 +39,7 @@ def _filters(user):
 
 
 def list_for_user(user, start=0, page_length=20):
+    require_management_access(user)
     from bs4 import BeautifulSoup
     start = max(0, int(start))
     page_length = min(50, max(1, int(page_length)))
@@ -53,6 +55,7 @@ def list_for_user(user, start=0, page_length=20):
 
 
 def mark_read_for_user(user, name):
+    require_management_access(user)
     if not isinstance(name, str) or not name or len(name) > 140:
         frappe.throw(_('Notification not found'), frappe.PermissionError)
     filters = {**_filters(user), 'name': name}

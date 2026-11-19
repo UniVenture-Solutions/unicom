@@ -23,7 +23,7 @@ class CoordinationTests(unittest.TestCase):
                            resolution_note='', access=[], timeline=[], flags=SimpleNamespace(), saved=False)
         self.db = SimpleNamespace(exists=lambda doctype, filters: filters['name'] in {'owner','coordinator','website'},
                                   get_value=lambda doctype, name, field: 'Website User' if name=='website' else 'System User')
-        self.patches = [patch.object(frappe, 'db', self.db), patch.object(frappe, 'new_doc', return_value=self.doc),
+        self.patches = [patch.object(frappe, 'get_roles', side_effect=lambda user=None: ['Management'] if (user or frappe.session.user) in {'owner','creator','coordinator'} else []), patch.object(frappe, 'db', self.db), patch.object(frappe, 'new_doc', return_value=self.doc),
                         patch.object(frappe, 'throw', side_effect=self.throw), patch.object(api, '_user', return_value='owner'),
                         patch.object(api, '_doc', return_value=self.doc), patch.object(api, '_output', side_effect=lambda x:x),
                         patch.object(api, 'now_datetime', return_value='2026-11-16 12:00:00')]
@@ -88,9 +88,10 @@ class CoordinationTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 api.create_issue('Issue', 'owner', 'Call', '2026-11-20', coordination_user=value)
 
-    def test_coordinator_alone_gets_no_access(self):
+    def test_coordinator_gets_read_only_access(self):
         api.update_issue('issue', {'coordination_user':'coordinator'})
-        self.assertFalse(permissions.issue_permission(self.doc, user='coordinator', ptype='read'))
+        self.assertTrue(permissions.issue_permission(self.doc, user='coordinator', ptype='read'))
+        self.assertFalse(permissions.issue_action_permission(self.doc, user='coordinator'))
         self.assertTrue(permissions.issue_permission(self.doc, user='owner', ptype='read'))
         self.assertEqual(self.doc.access, [])
 

@@ -28,12 +28,21 @@ class OneTimeImportTests(unittest.TestCase):
         self.load = Mock(return_value=self.source)
         self.run = Mock(return_value=self.report)
         self.db = SimpleNamespace(rollback=Mock())
-        patches = [patch.object(frappe, 'local', self.local), patch.object(frappe, 'session', self.session), patch.object(frappe, 'cache', self.cache), patch.object(frappe, 'db', self.db), patch.object(frappe, 'throw', side_effect=self.throw), patch.object(core, 'load_source', self.load), patch.object(core, 'run', self.run)]
+        patches = [patch('unicom.access._', side_effect=lambda message: message), patch.object(frappe, 'get_roles', side_effect=lambda user=None: ['Management'] if (user or frappe.session.user) in {'Administrator'} else []), patch.object(frappe, 'local', self.local), patch.object(frappe, 'session', self.session), patch.object(frappe, 'cache', self.cache), patch.object(frappe, 'db', self.db), patch.object(frappe, 'throw', side_effect=self.throw), patch.object(core, 'load_source', self.load), patch.object(core, 'run', self.run)]
         for item in patches: item.start()
         self.addCleanup(lambda: [item.stop() for item in reversed(patches)])
 
     @staticmethod
     def throw(message, exception=None): raise (exception or ValueError)(message)
+
+    def test_existing_admin_host_checks_also_require_management(self):
+        with patch.object(frappe, 'get_roles', return_value=[]):
+            with self.assertRaises(frappe.PermissionError):web.preview('payload')
+        self.run.assert_not_called()
+        self.request.host='wrong.invalid'
+        with patch.object(web, 'require_management_access') as gate:
+            with self.assertRaises(frappe.PermissionError):web.preview('payload')
+            gate.assert_not_called()
 
     def test_only_two_public_mutation_methods_are_post_only(self):
         self.assertEqual(frappe.allowed_http_methods_for_whitelisted_func[web.preview], ['POST'])

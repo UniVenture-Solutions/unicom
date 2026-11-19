@@ -1,9 +1,11 @@
 import frappe
+from unicom.access import require_management_access
 
 def get_context(context):
     if frappe.session.user == 'Guest':
         frappe.local.flags.redirect_location = '/login?redirect-to=/unicom'
         raise frappe.Redirect
+    require_management_access()
     context.no_cache = 1
     context.csrf_token = frappe.sessions.get_csrf_token()
     configured = frappe.db.get_single_value('System Settings', 'date_format')

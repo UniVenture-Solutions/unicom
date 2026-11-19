@@ -86,7 +86,7 @@ class ScheduledEventTests(unittest.TestCase):
 
     def test_today_query_is_site_date_actor_active_readable_and_incomplete(self):
         row={'name':'event','issue_name':'issue','scheduled_date':date(2026,11,19),'scheduled_time':timedelta(hours=9)}
-        with patch.object(api,'today',return_value='2026-11-19'), patch.object(api,'issue_query',return_value='readable_only') as permission, patch.object(frappe.db,'sql',return_value=[row]) as sql:
+        with patch.object(api,'today',return_value='2026-11-19'), patch.object(api,'issue_action_query',return_value='readable_only') as permission, patch.object(frappe.db,'sql',return_value=[row]) as sql:
             output=api.today_schedule()
         permission.assert_called_once_with('owner')
         query,args=sql.call_args.args

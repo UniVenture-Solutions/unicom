@@ -21,7 +21,7 @@ class CommentTests(unittest.TestCase):
                            access=[], timeline=[], flags=SimpleNamespace(), saved=False)
         self.session = SimpleNamespace(user='owner')
         self.db = SimpleNamespace(sql=lambda *args: None, exists=lambda doctype, filters: filters['name'] in {'owner', 'mentioned'})
-        self.patches = [patch.object(frappe, 'session', self.session), patch.object(frappe, 'db', self.db),
+        self.patches = [patch.object(frappe, 'get_roles', side_effect=lambda user=None: ['Management'] if (user or frappe.session.user) in {'owner','creator','mentioned','Administrator'} else []), patch.object(frappe, 'session', self.session), patch.object(frappe, 'db', self.db),
                         patch.object(frappe, 'get_doc', return_value=self.doc),
                         patch.object(frappe, 'throw', side_effect=self.throw),
                         patch.object(api, '_output', side_effect=lambda doc: doc), patch.object(api, '_notify_mentions'),
