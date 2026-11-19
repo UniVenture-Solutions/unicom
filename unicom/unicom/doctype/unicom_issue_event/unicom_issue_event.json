@@ -12,7 +12,10 @@
     "contact",
     "body",
     "changes",
-    "reply_to"
+    "reply_to",
+    "source_comment",
+    "follow_up_action",
+    "follow_up_date"
   ],
   "fields": [
     {
@@ -65,6 +68,24 @@
       "fieldname": "reply_to",
       "label": "Reply To",
       "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_comment",
+      "label": "Source comment",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "follow_up_action",
+      "label": "Follow-up action",
+      "fieldtype": "Small Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "follow_up_date",
+      "label": "Follow-up date",
+      "fieldtype": "Date",
       "read_only": 1
     }
   ],

@@ -343,21 +343,35 @@ def update_issue(name, values):
 
 
 @frappe.whitelist(methods=['POST'])
-def log_communication(name, channel, happened_at, body, next_action=None, next_action_date=None, resolution_note=None, contact='', mentions=None):
+def log_communication(name, channel, happened_at, body, next_action=None, next_action_date=None, resolution_note=None, contact='', mentions=None, source_comment=None, set_follow_up=None):
     doc = _doc(name, lock=True)
     if doc.status == 'Resolved': frappe.throw(_('Reopen the issue first'))
     if channel not in CHANNELS or not happened_at or not (body or '').strip(): frappe.throw(_('Channel, time and outcome are required'))
+    if source_comment:
+        source = next((event for event in doc.timeline if event.name == source_comment), None)
+        if not source or source.kind != 'Comment' or source.actor != _user():
+            frappe.throw(_('Invalid source comment'))
+        if any(getattr(event, 'source_comment', None) == source_comment for event in doc.timeline):
+            frappe.throw(_('This comment already has a communication log'))
+    if set_follow_up is not None and set_follow_up not in (True, False, 0, 1):
+        frappe.throw(_('Invalid follow-up selection'))
+    if set_follow_up and resolution_note:
+        frappe.throw(_('Log a follow-up or resolve the issue, not both'))
+    if set_follow_up and not next_action_date:
+        frappe.throw(_('A follow-up date is required'))
+    if next_action_date:
+        getdate(next_action_date)
     before = _snapshot(doc)
     if resolution_note:
         doc.status, doc.resolution_note = 'Resolved', resolution_note
-    else:
+    elif set_follow_up is None or set_follow_up:
         doc.next_action, doc.next_action_date = next_action, next_action_date
     # Mention grants are durable and separate from participant membership.
     mentioned_users = [node.get('data-id') for node in BeautifulSoup(body, 'html.parser').select('[data-type=mention][data-id]')]
     for user in _users(mentioned_users):
         if not any(r.user == user and r.reason == 'Mention' for r in doc.access): doc.append('access', {'user': user, 'reason': 'Mention'})
     _validate(doc)
-    _event(doc, 'Communication', before, channel=channel, happened_at=happened_at, body=_rich_html(body, doc), contact=contact)
+    _event(doc, 'Communication', before, channel=channel, happened_at=happened_at, body=_rich_html(body, doc), contact=contact, source_comment=source_comment or None, follow_up_action=next_action, follow_up_date=next_action_date)
     doc.flags.unicom_api = True
     doc.save(ignore_permissions=True)
     return _output(doc)
