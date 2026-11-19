@@ -12,8 +12,9 @@ from bs4 import BeautifulSoup
 
 import frappe
 from frappe import _
-from frappe.utils import getdate, now_datetime, today
-from unicom.permissions import issue_permission, issue_query
+from unicom.access import require_management_access
+from frappe.utils import getdate, get_datetime, now_datetime, today
+from unicom.permissions import issue_permission, issue_query, issue_action_permission, issue_action_query, system_manager
 from unicom.notifications import notify_mentions as _notify_mentions
 
 STATUSES = ('Open', 'In Progress', 'Waiting', 'Resolved')
@@ -23,6 +24,7 @@ CHANNELS = ('Internal Note', 'Call', 'Meeting', 'Email', 'WhatsApp')
 def _user():
     if frappe.session.user == 'Guest':
         frappe.throw(_('Please sign in'), frappe.PermissionError)
+    require_management_access()
     return frappe.session.user
 
 
@@ -153,7 +155,7 @@ def _doc(name, lock=False):
     _user()
     # A locking fetch is also a current read under MariaDB REPEATABLE READ.
     doc = frappe.get_doc('UniCom Issue', name, for_update=True) if lock else frappe.get_doc('UniCom Issue', name)
-    if not issue_permission(doc, user=frappe.session.user, ptype='read'):
+    if not issue_permission(doc, user=frappe.session.user, ptype='read') or (lock and not issue_action_permission(doc, user=frappe.session.user)):
         frappe.throw(_('Not permitted'), frappe.PermissionError)
     return doc
 
@@ -229,11 +231,12 @@ def _can_delegate_schedule(doc, user):
 
 
 def _schedule_author_eligible(doc, user):
-    return user != 'Guest' and bool(frappe.db.exists('User', {'name': user, 'enabled': 1})) and issue_permission(doc, user=user, ptype='read')
+    return user != 'Guest' and bool(frappe.db.exists('User', {'name': user, 'enabled': 1})) and issue_action_permission(doc, user=user)
 
 
 def _output(doc):
     result = doc.as_dict()
+    result['can_edit'] = issue_action_permission(doc, user=frappe.session.user)
     source_doctype = result.pop('reference_doctype', None)
     source_name = result.pop('reference_name', None)
     if _source_document(source_doctype, source_name):
@@ -247,7 +250,7 @@ def _output(doc):
     profile_users.discard('')
     # This document was already checked for access. Only its referenced people are exposed.
     result['user_profiles'] = frappe.get_all('User', filters={'name': ['in', sorted(profile_users)]}, fields=['name', 'full_name', 'user_image'], limit_page_length=0) if profile_users else []
-    candidates = sorted({event.actor for event in doc.timeline if event.kind == 'Comment' and event.actor != 'Guest' and issue_permission(doc, user=event.actor, ptype='read')}) if _can_delegate_schedule(doc, frappe.session.user) else []
+    candidates = sorted({event.actor for event in doc.timeline if event.kind == 'Comment' and event.actor != 'Guest' and issue_action_permission(doc, user=event.actor)}) if _can_delegate_schedule(doc, frappe.session.user) else []
     result['schedule_eligible_authors'] = frappe.get_all('User', filters={'name': ['in', candidates], 'enabled': 1}, pluck='name', limit_page_length=0) if candidates else []
     return result
 
@@ -256,6 +259,19 @@ def _output(doc):
 def users(query=''):
     _user()
     return frappe.get_all('User', filters={'enabled': 1, 'name': ['not in', ['Guest', 'Administrator']], 'full_name': ['like', '%' + query + '%']}, fields=['name', 'full_name', 'user_type', 'user_image'], order_by='full_name', limit_page_length=10000)
+
+
+def _last_updated_label(value, listed_at):
+    if not value:
+        return '—'
+    try:
+        seconds = max(0, int((listed_at - get_datetime(value)).total_seconds()))
+    except (TypeError, ValueError):
+        return '—'
+    for size, suffix in ((365 * 86400, 'Y'), (30 * 86400, 'M'), (86400, 'd'), (3600, 'h')):
+        if seconds >= size:
+            return str(seconds // size) + suffix
+    return str(seconds // 60) + 'm'
 
 
 @frappe.whitelist()
@@ -276,9 +292,18 @@ def list_issues(view='all', status=None, search=None, start=0, page_length=20):
     if view == 'mine':
         # Query filter must be combined with access permissions before pagination.
         u = frappe.db.escape(user)
-        filters['name'] = ['in', [r.name for r in frappe.db.sql(f'''SELECT DISTINCT i.name FROM `tabUniCom Issue` i LEFT JOIN `tabUniCom Issue Access` a ON a.parent=i.name AND a.parenttype='UniCom Issue' AND a.parentfield='access' WHERE i.owner={u} OR i.accountable_owner={u} OR (a.user={u} AND a.reason IN ('Participant','Follow-up'))''', as_dict=True)] or ['']]
+        if not system_manager(user):
+            filters['name'] = ['in', [r.name for r in frappe.db.sql(f'''SELECT DISTINCT i.name FROM `tabUniCom Issue` i LEFT JOIN `tabUniCom Issue Access` a ON a.parent=i.name AND a.parenttype='UniCom Issue' AND a.parentfield='access' WHERE i.owner={u} OR i.coordination_user={u} OR i.accountable_owner={u} OR (a.user={u} AND a.reason IN ('Participant','Follow-up'))''', as_dict=True)] or ['']]
         rows = frappe.get_list('UniCom Issue', filters=filters, fields=['name','issue_id','title','status','accountable_owner','coordination_user','owner','next_action','next_action_date','modified'], order_by='modified desc', limit_start=max(0,int(start)), limit_page_length=min(100,max(1,int(page_length))))
+    page_names = [row.name for row in rows]
+    comment_counts = {row.parent: int(row.comment_count) for row in frappe.get_all(
+        'UniCom Issue Event', filters={'parent': ['in', page_names], 'parenttype': 'UniCom Issue', 'parentfield': 'timeline', 'kind': 'Comment'},
+        fields=['parent', {'COUNT': 'name', 'as': 'comment_count'}], group_by='parent', order_by='', limit_page_length=0,
+    )} if page_names else {}
+    listed_at = now_datetime()
     for row in rows:
+        row['comment_count'] = comment_counts.get(row.name, 0)
+        row['last_updated'] = _last_updated_label(row.modified, listed_at)
         row['overdue'] = bool(row.status != 'Resolved' and row.next_action_date and getdate(row.next_action_date) < getdate(today()))
     return rows
 
@@ -462,7 +487,7 @@ def complete_scheduled_event(name, event_name):
 @frappe.whitelist(methods=['GET'])
 def today_schedule():
     user, day = _user(), today()
-    permission = issue_query(user)
+    permission = issue_action_query(user)
     rows = frappe.db.sql("""SELECT e.name, e.parent AS issue_name,
         `tabUniCom Issue`.issue_id, `tabUniCom Issue`.title AS issue_title,
         e.follow_up_action AS title, e.contact, e.follow_up_date AS scheduled_date,
@@ -565,3 +590,15 @@ def inline_image(name, attachment):
 @frappe.whitelist(methods=['POST'])
 def upload_image(docname):
     return upload_attachment(docname, image_only=True)
+
+
+@frappe.whitelist(methods=['GET'])
+def dashboard_receivables():
+    from unicom.dashboard import receivables_summary
+    return receivables_summary(_user())
+
+
+@frappe.whitelist(methods=['GET'])
+def dashboard_monthly():
+    from unicom.monthly_dashboard import monthly_summary
+    return monthly_summary(_user())

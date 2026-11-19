@@ -4,6 +4,7 @@ import hmac
 import secrets
 
 import frappe
+from unicom.access import require_management_access
 from unicom import selected_transfer as transfer
 
 ORIGIN = 'https://' + transfer.TARGET_HOST
@@ -18,6 +19,7 @@ def _require_admin_post():
     request = getattr(frappe.local, 'request', None)
     if not _host_allowed() or frappe.session.user != 'Administrator' or request.method != 'POST':
         frappe.throw('Administrator access is required on the destination site.', frappe.PermissionError)
+    require_management_access()
     saved = frappe.session.data.get('csrf_token')
     supplied = request.headers.get('X-Frappe-CSRF-Token', '')
     if request.headers.get('Origin') != ORIGIN or not isinstance(saved, str) or not saved or not isinstance(supplied, str) or not hmac.compare_digest(saved, supplied):

@@ -1,0 +1,9 @@
+[
+  {
+    "doctype": "Role",
+    "name": "Management",
+    "role_name": "Management",
+    "desk_access": 1,
+    "disabled": 0
+  }
+]

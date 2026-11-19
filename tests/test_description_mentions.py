@@ -26,7 +26,7 @@ class DescriptionMentionTests(unittest.TestCase):
                            resolution_note='', access=[], timeline=[], flags=SimpleNamespace(), saved=False)
         self.session = SimpleNamespace(user='owner')
         self.db = SimpleNamespace(exists=lambda doctype, filters: filters['name'] in {'owner', 'mentioned'})
-        patches = [patch.object(frappe, 'session', self.session), patch.object(frappe, 'db', self.db),
+        patches = [patch.object(frappe, 'get_roles', side_effect=lambda user=None: ['Management'] if (user or frappe.session.user) in {'owner','mentioned'} else []), patch.object(frappe, 'session', self.session), patch.object(frappe, 'db', self.db),
                    patch.object(frappe, 'new_doc', return_value=self.doc), patch.object(frappe, 'get_doc', return_value=self.doc),
                    patch.object(frappe, 'throw', side_effect=self.throw),
                    patch.object(api, '_output', side_effect=lambda doc: doc), patch.object(api, '_notify_mentions'),
