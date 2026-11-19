@@ -22,10 +22,10 @@ def receivables_summary(user):
     cutoff = add_days(day, -30)
     filters = {'docstatus': 1, 'is_return': 0, 'outstanding_amount': ['>', 0], 'posting_date': ['<=', day]}
     try:
-        overdue = frappe.get_list('Sales Invoice', fields=['count(name) as invoice_count'],
+        overdue = frappe.get_list('Sales Invoice', fields=[{'COUNT': 'name', 'as': 'invoice_count'}],
                                  filters={**filters, 'posting_date': ['<=', cutoff]},
                                  order_by='', limit_page_length=0, ignore_permissions=False, user=user)
-        groups = frappe.get_list('Sales Invoice', fields=['party_account_currency', 'sum(outstanding_amount) as amount', 'count(name) as invoice_count'],
+        groups = frappe.get_list('Sales Invoice', fields=['party_account_currency', {'SUM': 'outstanding_amount', 'as': 'amount'}, {'COUNT': 'name', 'as': 'invoice_count'}],
                                 filters=filters, group_by='party_account_currency', order_by='party_account_currency',
                                 limit_page_length=0, ignore_permissions=False, user=user)
     except frappe.PermissionError:

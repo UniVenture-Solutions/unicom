@@ -44,7 +44,9 @@ class ReceivablesTests(unittest.TestCase):
             self.assertEqual(query['user'],'viewer')
             self.assertEqual(query['limit_page_length'],0)
         self.assertEqual(totals['group_by'],'party_account_currency')
-        self.assertIn('sum(outstanding_amount) as amount',totals['fields'])
+        self.assertIn({'SUM':'outstanding_amount','as':'amount'},totals['fields'])
+        self.assertIn({'COUNT':'name','as':'invoice_count'},totals['fields'])
+        self.assertEqual(count['fields'],[{'COUNT':'name','as':'invoice_count'}])
 
     def test_missing_app_read_or_required_field_access_returns_no_financial_data(self):
         for target,values in [('apps',[]),('read',False),('fields',['name','docstatus'])]:
