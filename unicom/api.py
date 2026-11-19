@@ -364,8 +364,12 @@ def log_communication(name, channel, happened_at, body, next_action=None, next_a
     before = _snapshot(doc)
     if resolution_note:
         doc.status, doc.resolution_note = 'Resolved', resolution_note
-    elif set_follow_up is None or set_follow_up:
+    elif set_follow_up is None:
         doc.next_action, doc.next_action_date = next_action, next_action_date
+    elif set_follow_up:
+        if next_action and next_action.strip():
+            doc.next_action = next_action
+        doc.next_action_date = next_action_date
     # Mention grants are durable and separate from participant membership.
     mentioned_users = [node.get('data-id') for node in BeautifulSoup(body, 'html.parser').select('[data-type=mention][data-id]')]
     for user in _users(mentioned_users):

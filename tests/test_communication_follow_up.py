@@ -23,6 +23,18 @@ class CommunicationFollowUpTests(unittest.TestCase):
         self.log(next_action='Visit', next_action_date='2026-11-21', set_follow_up=True)
         self.assertEqual((self.doc.next_action, self.doc.next_action_date), ('Visit', '2026-11-21'))
 
+    def test_checked_blank_action_only_changes_issue_date(self):
+        for action in (None, '', '   '):
+            with self.subTest(action=action):
+                self.doc.next_action = 'Call back'
+                self.log(next_action=action, next_action_date='2026-11-21', set_follow_up=True)
+                self.assertEqual((self.doc.next_action, self.doc.next_action_date), ('Call back', '2026-11-21'))
+                self.assertEqual(self.doc.timeline[-1].follow_up_action, action)
+
+    def test_legacy_blank_action_still_clears_issue_action(self):
+        self.log(next_action='', next_action_date='2026-11-21')
+        self.assertEqual(self.doc.next_action, '')
+
     def test_resolution_cannot_silently_ignore_checked_follow_up(self):
         with self.assertRaises(ValueError):
             self.log(set_follow_up=True, next_action_date='2026-11-21', resolution_note='Done')
