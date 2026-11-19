@@ -333,7 +333,7 @@ async function openSchedule(commentName=null){
   let title=hint?.title || ''
   if(hint?.schedule_type==='Meeting' && !hint.contact && contact && (!title || title==='Meeting'))title='Meeting with '+contact
   Object.assign(schedule,{
-    schedule_type:hint?.schedule_type || 'Meeting',title,contact,scheduled_date:'',scheduled_time:hint?.scheduled_time || '',
+    schedule_type:hint?.schedule_type || 'Meeting',title,contact,scheduled_date:hint?.scheduled_date || '',scheduled_time:hint?.scheduled_time || '',
     source_comment:commentName,set_follow_up:false,
   })
   scheduledFor.value=commentName ? issue.value.timeline.find(event=>event.name===commentName)?.actor || currentUser.value : currentUser.value
@@ -666,10 +666,7 @@ onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notif
         <FormControl v-model="schedule.scheduled_date" type="date" label="Event date" required/>
         <FormControl v-model="schedule.scheduled_time" type="time" label="Time (optional)"/>
       </div>
-      <div v-if="suggestedScheduleDate" class="flex flex-wrap items-center gap-2 text-sm text-gray-600">
-        <span>Suggested date: {{formatSiteTime(suggestedScheduleDate)}}</span>
-        <Button type="button" size="sm" @click="schedule.scheduled_date=suggestedScheduleDate">Use suggested date</Button>
-      </div>
+      <p v-if="suggestedScheduleDate" class="text-sm text-gray-600">Date suggested from the comment. Review or edit it before saving.</p>
       <p v-if="schedule.source_comment && schedule.schedule_type==='Meeting'" class="text-xs text-gray-600">Confirm when the meeting will take place. The comment may refer to when it will be arranged.</p>
       <p v-if="issue?.next_action_date" class="text-sm text-gray-600">Current issue next action date: {{formatSiteTime(issue.next_action_date)}}</p>
       <label class="flex items-center gap-2 text-sm"><input v-model="schedule.set_follow_up" type="checkbox">Set as issue follow-up</label>
