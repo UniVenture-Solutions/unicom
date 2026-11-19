@@ -15,14 +15,17 @@
     "reply_to",
     "source_comment",
     "follow_up_action",
-    "follow_up_date"
+    "follow_up_date",
+    "schedule_type",
+    "scheduled_time",
+    "completed_at"
   ],
   "fields": [
     {
       "fieldname": "kind",
       "label": "Kind",
       "fieldtype": "Select",
-      "options": "Created\nUpdated\nCommunication\nResolved\nReopened\nComment",
+      "options": "Created\nUpdated\nCommunication\nResolved\nReopened\nComment\nScheduled",
       "reqd": 1
     },
     {
@@ -86,6 +89,25 @@
       "fieldname": "follow_up_date",
       "label": "Follow-up date",
       "fieldtype": "Date",
+      "read_only": 1
+    },
+    {
+      "fieldname": "schedule_type",
+      "label": "Schedule type",
+      "fieldtype": "Select",
+      "options": "\nMeeting\nFollow-up",
+      "read_only": 1
+    },
+    {
+      "fieldname": "scheduled_time",
+      "label": "Scheduled time",
+      "fieldtype": "Time",
+      "read_only": 1
+    },
+    {
+      "fieldname": "completed_at",
+      "label": "Completed at",
+      "fieldtype": "Datetime",
       "read_only": 1
     }
   ],

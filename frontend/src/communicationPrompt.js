@@ -35,8 +35,8 @@ export function followUpHint(text, recordedAt) {
   return date.toISOString().slice(0,10)
 }
 
-export function createCommunicationDismissals(getStorage) {
-  const storageKey='unicom.communicationDismissals.v1', limit=200
+export function createCommunicationDismissals(getStorage,namespace='communication') {
+  const storageKey='unicom.'+namespace+'Dismissals.v1', limit=200
   let keys=[]
   try {
     const saved=JSON.parse(getStorage().getItem(storageKey) || '[]')
@@ -55,13 +55,38 @@ export function createCommunicationDismissals(getStorage) {
 
 export function savedCommunicationPrompts(issue,user,dismissals,visibleText,currentDate) {
   if(!user || user==='Guest' || !['Open','In Progress','Waiting'].includes(issue?.status))return {}
-  const linked=new Set(issue.timeline.map(event=>event.source_comment).filter(Boolean)), prompts={}
+  const linked=new Set(issue.timeline.filter(event=>event.kind==='Communication').map(event=>event.source_comment).filter(Boolean)), prompts={}
   for(const event of [...issue.timeline].reverse()){
     if(event.kind!=='Comment' || event.actor!==user || linked.has(event.name) || dismissals.has(user,issue.name,event.name))continue
     const text=visibleText(event.body), hint=communicationHint(text)
     if(!hint)continue
     const date=followUpHint(text,event.recorded_at)
     prompts[event.name]={...hint,followUpDate:date && date>=currentDate ? date : ''}
+  }
+  return prompts
+}
+
+
+// A suggestion to confirm a plan, never evidence that a meeting happened.
+export function plannedMeetingHint(text,recordedAt,currentDate='') {
+  const value=String(text || '').replace(/\s+/g,' ').trim()
+  const directive=value.match(/^follow[ -]?up\b[^.!?]*/i)?.[0]
+  const clause=directive || value.match(/\b(?:meeting\s+(?:will|is going to)\s+be\s+(?:scheduled|held)|(?:will|going to|need to|plan to|planning to)\s+(?:schedule\s+(?:a\s+)?meeting|have\s+(?:a\s+)?meeting|meet\b|follow[ -]?up\b|call\b|visit\b)|follow[ -]?up\s+(?:on|due)\b)[^.!?]*/i)?.[0]
+  if(!clause || /\b(?:not|never|cancelled|canceled|won't|completed|finished|done)\b/i.test(clause) || /\b(?:not|never|won't|didn't)\s*$/.test(value.slice(0,value.indexOf(clause))))return null
+  const schedule_type=/\b(?:meeting|meet)\b/i.test(clause)?'Meeting':'Follow-up'
+  const contact=clause.match(/\b(?:with|meet|call|visit)\s+([A-Z][a-z]+(?:\s+(?:[A-Z][a-z]+|Sb))?)(?=[,;]|\s+(?:on|at|and|about|regarding)\b|$)/)?.[1] || ''
+  const date=followUpHint('will '+clause,recordedAt)
+  const title=schedule_type==='Meeting' && !contact && /^meeting\s+(?:will|is going to)\s+be\s+(?:scheduled|held)\b/i.test(clause) ? 'Meeting' : clause.charAt(0).toUpperCase()+clause.slice(1,140)
+  return {schedule_type,title,contact,scheduled_date:date && (!currentDate || date>=currentDate)?date:'',scheduled_time:''}
+}
+
+export function savedPlannedEventPrompts(issue,user,dismissals,visibleText,currentDate) {
+  if(!user || user==='Guest' || !['Open','In Progress','Waiting'].includes(issue?.status))return {}
+  const linked=new Set(issue.timeline.filter(event=>event.kind==='Scheduled').map(event=>event.source_comment).filter(Boolean)), prompts={}
+  for(const event of issue.timeline){
+    if(event.kind!=='Comment' || event.actor!==user || linked.has(event.name) || dismissals.has(user,issue.name,event.name))continue
+    const hint=plannedMeetingHint(visibleText(event.body),event.recorded_at,currentDate)
+    if(hint)prompts[event.name]=hint
   }
   return prompts
 }

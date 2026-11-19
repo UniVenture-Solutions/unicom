@@ -3,6 +3,8 @@ import io
 import json
 import os
 import secrets
+import re
+from datetime import date, time
 from urllib.parse import urlencode
 from PIL import Image, UnidentifiedImageError
 from werkzeug.wrappers import Response
@@ -11,7 +13,7 @@ from bs4 import BeautifulSoup
 import frappe
 from frappe import _
 from frappe.utils import getdate, now_datetime, today
-from unicom.permissions import issue_permission
+from unicom.permissions import issue_permission, issue_query
 from unicom.notifications import notify_mentions as _notify_mentions
 
 STATUSES = ('Open', 'In Progress', 'Waiting', 'Resolved')
@@ -351,7 +353,7 @@ def log_communication(name, channel, happened_at, body, next_action=None, next_a
         source = next((event for event in doc.timeline if event.name == source_comment), None)
         if not source or source.kind != 'Comment' or source.actor != _user():
             frappe.throw(_('Invalid source comment'))
-        if any(getattr(event, 'source_comment', None) == source_comment for event in doc.timeline):
+        if any(event.kind == 'Communication' and getattr(event, 'source_comment', None) == source_comment for event in doc.timeline):
             frappe.throw(_('This comment already has a communication log'))
     if set_follow_up is not None and set_follow_up not in (True, False, 0, 1):
         frappe.throw(_('Invalid follow-up selection'))
@@ -379,6 +381,88 @@ def log_communication(name, channel, happened_at, body, next_action=None, next_a
     doc.flags.unicom_api = True
     doc.save(ignore_permissions=True)
     return _output(doc)
+
+
+@frappe.whitelist(methods=['POST'])
+def schedule_event(name, schedule_type, scheduled_date, title, contact='', scheduled_time=None, source_comment=None, set_follow_up=False):
+    doc = _doc(name, lock=True)
+    if doc.status not in ('Open', 'In Progress', 'Waiting'):
+        frappe.throw(_('Reopen the issue first'))
+    if schedule_type not in ('Meeting', 'Follow-up'):
+        frappe.throw(_('Select a meeting or follow-up'))
+    if not isinstance(title, str) or not title.strip() or len(title) > 140:
+        frappe.throw(_('A title of up to 140 characters is required'))
+    if not isinstance(contact, str) or len(contact) > 140:
+        frappe.throw(_('Invalid contact'))
+    if not isinstance(scheduled_date, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', scheduled_date):
+        frappe.throw(_('A valid scheduled date is required'))
+    try:
+        date.fromisoformat(scheduled_date)
+    except ValueError:
+        frappe.throw(_('A valid scheduled date is required'))
+    if scheduled_time not in (None, ''):
+        if not isinstance(scheduled_time, str) or not re.fullmatch(r'\d{2}:\d{2}(?::\d{2})?', scheduled_time):
+            frappe.throw(_('Invalid scheduled time'))
+        try:
+            scheduled_time = time.fromisoformat(scheduled_time).isoformat()
+        except ValueError:
+            frappe.throw(_('Invalid scheduled time'))
+    if type(set_follow_up) not in (bool, int) or set_follow_up not in (0, 1):
+        frappe.throw(_('Invalid follow-up selection'))
+    if source_comment:
+        source = next((event for event in doc.timeline if event.name == source_comment), None)
+        if not source or source.kind != 'Comment' or source.actor != _user():
+            frappe.throw(_('Invalid source comment'))
+        if any(event.kind == 'Scheduled' and getattr(event, 'source_comment', None) == source_comment for event in doc.timeline):
+            frappe.throw(_('This comment already has a scheduled event'))
+    before = _snapshot(doc)
+    if set_follow_up:
+        doc.next_action, doc.next_action_date = title.strip(), scheduled_date
+    _validate(doc)
+    _event(doc, 'Scheduled', before, schedule_type=schedule_type, follow_up_date=scheduled_date,
+           follow_up_action=title.strip(), contact=contact.strip(), scheduled_time=scheduled_time or None,
+           source_comment=source_comment or None)
+    doc.flags.unicom_api = True
+    doc.save(ignore_permissions=True)
+    return _output(doc)
+
+
+@frappe.whitelist(methods=['POST'])
+def complete_scheduled_event(name, event_name):
+    doc = _doc(name, lock=True)
+    event = next((row for row in doc.timeline if row.name == event_name), None)
+    if not event or event.kind != 'Scheduled' or event.actor != _user():
+        frappe.throw(_('Not permitted'), frappe.PermissionError)
+    if getattr(event, 'completed_at', None):
+        return _output(doc)
+    if doc.status not in ('Open', 'In Progress', 'Waiting'):
+        frappe.throw(_('Reopen the issue first'))
+    event.completed_at = now_datetime()
+    doc.flags.unicom_api = True
+    doc.save(ignore_permissions=True)
+    return _output(doc)
+
+
+@frappe.whitelist(methods=['GET'])
+def today_schedule():
+    user, day = _user(), today()
+    permission = issue_query(user)
+    rows = frappe.db.sql("""SELECT e.name, e.parent AS issue_name,
+        `tabUniCom Issue`.issue_id, `tabUniCom Issue`.title AS issue_title,
+        e.follow_up_action AS title, e.contact, e.follow_up_date AS scheduled_date,
+        e.scheduled_time, e.schedule_type
+        FROM `tabUniCom Issue Event` e
+        INNER JOIN `tabUniCom Issue` ON `tabUniCom Issue`.name = e.parent
+        WHERE e.parenttype = 'UniCom Issue' AND e.parentfield = 'timeline'
+        AND e.kind = 'Scheduled' AND e.actor = %s AND e.follow_up_date = %s
+        AND e.completed_at IS NULL AND `tabUniCom Issue`.status IN ('Open','In Progress','Waiting')
+        """ + (' AND (' + permission + ')' if permission else '') + """
+        ORDER BY e.scheduled_time IS NULL, e.scheduled_time, e.recorded_at, e.name""", (user, day), as_dict=True)
+    for row in rows:
+        row['scheduled_date'] = str(row['scheduled_date'])
+        if row.get('scheduled_time') is not None:
+            row['scheduled_time'] = str(row['scheduled_time']).zfill(8)
+    return {'date': day, 'items': rows}
 
 
 
