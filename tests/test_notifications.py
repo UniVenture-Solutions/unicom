@@ -24,7 +24,7 @@ class MentionNotificationTests(unittest.TestCase):
         self.doc = FakeDoc(name='issue', issue_id='ISU-0020', owner='owner', title='<b>Private & title</b>',
                            description='', accountable_owner='owner', coordination_user=None,
                            status='Open', next_action='', next_action_date=None, resolution_note='',
-                           access=[], timeline=[], flags=SimpleNamespace(), saved=False)
+                           access=[], timeline=[], flags=SimpleNamespace(), saved=False, modified='2026-11-18 17:00:00')
         self.logs = []
         self.session = SimpleNamespace(user='owner')
         self.db = SimpleNamespace(exists=lambda doctype, filters: filters['name'] in {'owner', 'mentioned', 'second', 'website'})

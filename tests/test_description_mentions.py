@@ -44,7 +44,7 @@ class DescriptionMentionTests(unittest.TestCase):
         api.create_issue('Issue', 'owner', description='<p><strong>Hello</strong> ' + span + span + '</p>')
         self.assertIn('<strong>Hello</strong>', self.doc.description)
         self.assertIn('data-type="mention"', self.doc.description)
-        self.assertEqual([(row.user, row.reason) for row in self.doc.access], [('mentioned', 'Mention')])
+        self.assertEqual([(row.user, row.reason) for row in self.doc.access], [('mentioned', 'Mention'), ('mentioned', 'Participant')])
         self.assertTrue(permissions.issue_permission(self.doc, 'mentioned', 'read'))
         self.assertTrue(self.doc.saved)
 
