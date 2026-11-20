@@ -18,7 +18,7 @@ class CommentTests(unittest.TestCase):
     def setUp(self):
         self.doc = FakeDoc(name='issue', owner='creator', accountable_owner='owner', title='Issue', description='',
                            status='Open', next_action='Call back', next_action_date='2026-11-20', resolution_note='',
-                           access=[], timeline=[], flags=SimpleNamespace(), saved=False)
+                           access=[], timeline=[], flags=SimpleNamespace(), saved=False, modified='2026-11-16 12:00:00')
         self.session = SimpleNamespace(user='owner')
         self.db = SimpleNamespace(sql=lambda *args: None, exists=lambda doctype, filters: filters['name'] in {'owner', 'mentioned'})
         self.patches = [patch.object(frappe, 'get_roles', side_effect=lambda user=None: ['Management'] if (user or frappe.session.user) in {'owner','creator','mentioned','Administrator'} else []), patch.object(frappe, 'session', self.session), patch.object(frappe, 'db', self.db),
@@ -62,6 +62,7 @@ class CommentTests(unittest.TestCase):
         body = '<p>Hello <span data-type="mention" data-id="mentioned">@Mentioned</span></p>'
         api.add_comment('issue', body)
         self.assertTrue(api.issue_permission(self.doc, user='mentioned', ptype='read'))
+        self.assertEqual([(r.user, r.reason) for r in self.doc.access], [('mentioned', 'Mention'), ('mentioned', 'Participant')])
         api._set_users(self.doc, 'Participant', [])
         self.assertEqual([(r.user, r.reason) for r in self.doc.access], [('mentioned', 'Mention')])
         before = len(self.doc.timeline)

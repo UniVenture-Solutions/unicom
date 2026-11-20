@@ -17,7 +17,8 @@
     "resolution_note",
     "access",
     "timeline",
-    "attachments"
+    "attachments",
+    "ai_summary"
   ],
   "fields": [
     {
@@ -110,6 +111,12 @@
       "fieldtype": "Data",
       "read_only": 1,
       "permlevel": 1
+    },
+    {
+      "fieldname": "ai_summary",
+      "fieldtype": "Small Text",
+      "label": "AI Summary",
+      "read_only": 1
     }
   ],
   "autoname": "hash",

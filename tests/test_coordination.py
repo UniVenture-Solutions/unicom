@@ -20,10 +20,11 @@ class CoordinationTests(unittest.TestCase):
     def setUp(self):
         self.doc = FakeDoc(name='issue', owner='creator', title='Issue', description='', accountable_owner='owner',
                            coordination_user=None, status='Open', next_action='Call', next_action_date='2026-11-20',
-                           resolution_note='', access=[], timeline=[], flags=SimpleNamespace(), saved=False)
+                           resolution_note='', access=[], timeline=[], flags=SimpleNamespace(), saved=False,
+                           modified='2026-11-16 12:00:00')
         self.db = SimpleNamespace(exists=lambda doctype, filters: filters['name'] in {'owner','coordinator','website'},
                                   get_value=lambda doctype, name, field: 'Website User' if name=='website' else 'System User')
-        self.patches = [patch.object(frappe, 'get_roles', side_effect=lambda user=None: ['Management'] if (user or frappe.session.user) in {'owner','creator','coordinator'} else []), patch.object(frappe, 'db', self.db), patch.object(frappe, 'new_doc', return_value=self.doc),
+        self.patches = [patch.object(frappe, 'get_roles', side_effect=lambda user=None: ['Management'] if (user or frappe.session.user) in {'owner','creator','coordinator'} else []), patch.object(frappe, 'session', SimpleNamespace(user='owner')), patch.object(frappe, 'db', self.db), patch.object(frappe, 'new_doc', return_value=self.doc),
                         patch.object(frappe, 'throw', side_effect=self.throw), patch.object(api, '_user', return_value='owner'),
                         patch.object(api, '_doc', return_value=self.doc), patch.object(api, '_output', side_effect=lambda x:x),
                         patch.object(api, 'now_datetime', return_value='2026-11-16 12:00:00')]

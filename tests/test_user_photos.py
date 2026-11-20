@@ -19,13 +19,13 @@ class UserPhotoTests(unittest.TestCase):
             get_all.assert_not_called()
 
     def test_detail_profiles_only_referenced_issue_people(self):
-        doc=SimpleNamespace(owner='creator', accountable_owner='owner', coordination_user='coordinator', status='Resolved', next_action_date=None,
+        doc=SimpleNamespace(owner='creator', modified_by='modifier', accountable_owner='owner', coordination_user='coordinator', status='Resolved', next_action_date=None,
                             timeline=[SimpleNamespace(actor='Administrator'), SimpleNamespace(actor='former'), SimpleNamespace(actor='former')],
                             attachments=[], as_dict=lambda: {})
         with patch.object(frappe, 'get_all', return_value=[]) as get_all:
             result=api._output(doc)
         self.assertEqual(result['user_profiles'], [])
-        self.assertEqual(set(get_all.call_args.kwargs['filters']['name'][1]), {'creator','owner','coordinator','Administrator','former'})
+        self.assertEqual(set(get_all.call_args.kwargs['filters']['name'][1]), {'creator','modifier','owner','coordinator','Administrator','former'})
         self.assertEqual(get_all.call_args.kwargs['fields'], ['name','full_name','user_image'])
 
 if __name__ == '__main__': unittest.main()

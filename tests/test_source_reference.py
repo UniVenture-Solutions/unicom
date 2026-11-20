@@ -35,7 +35,7 @@ class SourceReferenceTests(unittest.TestCase):
         with self.assertRaises(frappe.PermissionError): api._source_pair('Invoice', 'DOC-1')
 
     def test_detail_redacts_on_revocation_or_deletion(self):
-        doc = SimpleNamespace(owner='creator', accountable_owner='owner', coordination_user=None, status='Resolved', next_action_date=None, timeline=[], attachments=[], as_dict=lambda: {'reference_doctype':'Invoice','reference_name':'DOC-1'})
+        doc = SimpleNamespace(owner='creator', modified_by='modifier', accountable_owner='owner', coordination_user=None, status='Resolved', next_action_date=None, timeline=[], attachments=[], as_dict=lambda: {'reference_doctype':'Invoice','reference_name':'DOC-1'})
         with patch.object(frappe, 'get_all', return_value=[]):
             self.assertEqual(api._output(doc)['reference_name'], 'DOC-1')
             self.allowed = False
@@ -47,7 +47,7 @@ class SourceReferenceTests(unittest.TestCase):
             self.assertNotIn('reference_name', api._output(doc))
 
     def test_create_persists_verified_pair(self):
-        doc = SimpleNamespace(update=lambda values: doc.__dict__.update(values), flags=SimpleNamespace(), insert=lambda **kwargs: None)
+        doc = SimpleNamespace(update=lambda values: doc.__dict__.update(values), flags=SimpleNamespace(), access=[], insert=lambda **kwargs: None)
         with patch.object(api, '_user'), patch.object(api, '_lock_source') as lock, patch.object(api, '_ensure_no_active_source') as ensure, patch.object(frappe, 'new_doc', return_value=doc), patch.object(api, '_rich_html', return_value=''), patch.object(api, '_coordination_selection', return_value=None), patch.object(api, '_set_users'), patch.object(api, '_validate'), patch.object(api, '_event'), patch.object(api, '_output', side_effect=lambda value: value):
             result = api.create_issue('Title', 'owner', 'Call', '2026-11-20', reference_doctype='Invoice', reference_name='DOC-1')
         self.assertEqual((result.reference_doctype, result.reference_name), ('Invoice', 'DOC-1'))
