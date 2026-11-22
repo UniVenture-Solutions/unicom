@@ -722,3 +722,21 @@ def issue_summary_status(name):
     from unicom.summary_jobs import fresh, pending, revision
     return {'summary': doc.ai_summary, 'fresh': fresh(doc),
             'pending': pending(doc.name, revision(doc.modified))}
+
+
+@frappe.whitelist(methods=['GET'])
+def dashboard_representatives():
+    from unicom.representative_dashboard import representative_summary
+    return representative_summary(_user())
+
+
+@frappe.whitelist(methods=['GET'])
+def dashboard_representative(name):
+    from unicom.representative_detail import detail_summary
+    return detail_summary(_user(),name)
+
+
+@frappe.whitelist(methods=['GET'])
+def representative_transactions(name,kind='Sales Invoice',start=0,bucket=None,company=None,currency=None,period=None):
+    from unicom.representative_detail import transactions
+    return transactions(_user(),name,kind,start,bucket,company,currency,period)

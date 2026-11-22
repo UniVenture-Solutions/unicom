@@ -1,17 +1,24 @@
 <script setup>
 import { formatDateOnly } from './dateFormat'
+import {useRoute,useRouter,RouterLink} from 'vue-router'
+import { monthLabel } from './monthLabel'
 import { createCommunicationDismissals, savedCommunicationPrompts, savedPlannedEventPrompts } from './communicationPrompt'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { Button, FormControl, Dialog, TextEditor, Badge, Avatar, FeatherIcon, ListView, ListFooter, FileUploader, ErrorMessage, Breadcrumbs, Dropdown, Popover, Switch } from 'frappe-ui'
 import PlannedEventSuggestion from './PlannedEventSuggestion.vue'
 import MonthlyMetricCard from './MonthlyMetricCard.vue'
+import RepresentativeReport from './RepresentativeReport.vue'
+import RepresentativeDetail from './RepresentativeDetail.vue'
 const formatSiteDate=value=>value===null || value===undefined || value==='' ? '' : formatDateOnly(value,window.unicom_date_format)
 
-const view=ref('mine'), rows=ref([]), issue=ref(null), people=ref([]), error=ref(''), busy=ref(false), page=ref(0), search=ref(''), filter=ref(''), showNew=ref(false), showLog=ref(false), showEdit=ref(false)
+const route=useRoute(), router=useRouter()
+const view=computed(()=>route.meta.view||'mine'), rows=ref([]), issue=ref(null), people=ref([]), error=ref(''), busy=ref(false), page=ref(0), search=ref(''), filter=ref(''), showNew=ref(false), showLog=ref(false), showEdit=ref(false)
 const canEdit=computed(()=>issue.value?.can_edit!==false)
 const currentUser=ref(''), sidebarCollapsed=ref(false), pageLength=ref(20), detailsOpen=ref(true), attachmentsOpen=ref(false)
-const showDashboard=ref(true), today=ref(new Date())
+const representativeName=computed(()=>route.name==='Representative'?String(route.params.representativeId):'')
+const showDashboard=computed(()=>route.name==='Dashboard'), today=ref(new Date())
 const dashboardDate=ref(''), todaySchedule=ref([]), todayScheduleLoading=ref(false), todayScheduleError=ref('')
+const representativeReport=ref(null), representativeLoading=ref(false), representativeError=ref('')
 const monthlyMetrics=ref(null), monthlyLoading=ref(false), monthlyError=ref('')
 const receivables=ref(null), receivablesLoading=ref(false), receivablesError=ref('')
 const completingEvent=ref('')
@@ -112,8 +119,18 @@ function receivableAmount(value){
   const [whole,fraction]=String(value).split('.')
   return whole.replace(/\B(?=(\d{3})+(?!\d))/g,',')+(fraction ? '.'+fraction : '')
 }
+async function refreshRepresentativeReport(){
+  if(route.name!=='Dashboard' || !showDashboard.value || issue.value || representativeLoading.value)return
+  representativeLoading.value=true;representativeError.value=''
+  try{
+    const result=await api('dashboard_representatives')
+    if(typeof result?.available!=='boolean' || !Array.isArray(result.items))throw new Error('Invalid report')
+    representativeReport.value=result
+  }catch(_){representativeReport.value=null;representativeError.value='Could not load representative report.'}
+  finally{representativeLoading.value=false}
+}
 async function refreshMonthlyMetrics(){
-  if(!locationView().dashboard || !showDashboard.value || issue.value || monthlyLoading.value)return
+  if(route.name!=='Dashboard' || !showDashboard.value || issue.value || monthlyLoading.value)return
   monthlyLoading.value=true;monthlyError.value=''
   try{
     const result=await api('dashboard_monthly')
@@ -123,7 +140,7 @@ async function refreshMonthlyMetrics(){
   finally{monthlyLoading.value=false}
 }
 async function refreshReceivables(){
-  if(!locationView().dashboard || !showDashboard.value || issue.value || receivablesLoading.value)return
+  if(route.name!=='Dashboard' || !showDashboard.value || issue.value || receivablesLoading.value)return
   receivablesLoading.value=true;receivablesError.value=''
   try{
     const result=await api('dashboard_receivables')
@@ -132,7 +149,7 @@ async function refreshReceivables(){
   }catch(_){receivables.value=null;receivablesError.value='Could not load invoice summary.'}
   finally{receivablesLoading.value=false}
 }
-watch([showDashboard,()=>issue.value?.name],()=>{if(showDashboard.value && !issue.value){refreshReceivables();refreshMonthlyMetrics()}})
+watch([showDashboard,()=>issue.value?.name],()=>{if(showDashboard.value && !issue.value){refreshReceivables();refreshMonthlyMetrics();refreshRepresentativeReport()}})
 async function refreshTodaySchedule(){
   if(!showDashboard.value || issue.value || todayScheduleLoading.value || completingEvent.value)return
   todayScheduleLoading.value=true
@@ -182,7 +199,7 @@ async function refreshNotifications(reset=true){
   }catch(_){notificationError.value='Could not load notifications. Please try again.'}
   finally{notificationLoading.value=false}
 }
-function notificationFocus(){if(!document.hidden){refreshReceivables();refreshMonthlyMetrics();today.value=new Date();if(!notificationOpening.value)refreshNotifications();refreshTodaySchedule()}}
+function notificationFocus(){if(!document.hidden){refreshReceivables();refreshMonthlyMetrics();refreshRepresentativeReport();today.value=new Date();if(!notificationOpening.value)refreshNotifications();refreshTodaySchedule()}}
 function toggleNotifications(togglePopover){if(notificationsOpen.value){togglePopover(false);return}togglePopover(true);refreshNotifications()}
 async function openNotification(row){
   if(notificationOpening.value)return
@@ -197,18 +214,62 @@ async function openNotification(row){
   }catch(_){notificationError.value='Could not mark this notification as read. Please try again.'}
   finally{notificationOpening.value=false}
 }
-async function load(){await run(async()=>{rows.value=await api('list_issues',{view:view.value,status:filter.value,search:search.value,start:page.value*pageLength.value,page_length:pageLength.value})})}
+let listRequest=0
+async function load(){
+  const token=++listRequest,scope=routeScope.value
+  busy.value=true;error.value=''
+  try{const result=await api('list_issues',{view:view.value,status:filter.value,search:search.value,start:page.value*pageLength.value,page_length:pageLength.value});if(token===listRequest && routeScope.value===scope)rows.value=result}
+  catch(e){if(token===listRequest && routeScope.value===scope)error.value=e.message}
+  finally{if(token===listRequest && routeScope.value===scope)busy.value=false}
+}
 function setPageLength(value){pageLength.value=value;page.value=0;load()}
 async function canLeaveInline(){if(nextActionSaving.value)return false;if(assignSavePromise && !await assignSavePromise)return false;if(assignmentDirty.value)return false;if(inlineDeferred.value || hasPendingImages.value)return false;const name=issue.value?.name;if(inlineSavePromise && !await inlineSavePromise)return false;if(issue.value?.name!==name)return false;return !inlineField.value || inlineValue.value===(issue.value?.[inlineField.value]||'') || window.confirm('Discard your unsaved issue edit?')}
-async function open(name,push=true,skipGuard=false){if(!skipGuard && issue.value?.name!==name && !await canLeaveInline())return;await run(async()=>{issue.value=await api('get_issue',{name});showDashboard.value=false;if(!notificationOpening.value)refreshNotifications(); if(push) history.pushState({},'', '/unicom/'+encodeURIComponent(name))})}
-function listRoute(v){return '/unicom?view='+encodeURIComponent(v)}
-function currentRoute(){return issue.value?'/unicom/'+encodeURIComponent(issue.value.name):showDashboard.value?'/unicom':listRoute(view.value)}
-function locationView(){const name=decodeURIComponent(location.pathname.replace(/^\/unicom\/?/,''));const requested=new URLSearchParams(location.search).get('view');return name?{name}:['mine','overdue','all'].includes(requested)?{view:requested}:{dashboard:true}}
-async function applyLocation(){const target=locationView();if(target.name){await open(target.name,false,true);return}issue.value=null;error.value='';page.value=0;showDashboard.value=!!target.dashboard;if(target.view){view.value=target.view;await load()}else {refreshTodaySchedule();refreshReceivables();refreshMonthlyMetrics()}}
-async function goDashboard(){if(!await canLeaveInline())return;issue.value=null;showDashboard.value=true;today.value=new Date();error.value='';history.pushState({},'','/unicom');refreshTodaySchedule()}
-async function goList(v){if(!await canLeaveInline())return;view.value=v;showDashboard.value=false;issue.value=null;page.value=0;history.pushState({},'',listRoute(v));load()}
+const routeScope=computed(()=>String(route.name)+':'+String(route.params.issueId||route.params.representativeId||''))
+let routeRequest=0,routeLoad=Promise.resolve(),routesReady=false,createdIssue=null
+const removeRouteGuard=router.beforeEach(async(to,from)=>{
+  if(!from.matched.length || (to.name==='Issue' && from.name==='Issue' && to.params.issueId===from.params.issueId))return true
+  return await canLeaveInline()
+})
+async function scrollRouteComment(){
+  if(!issue.value || route.name!=='Issue')return
+  const match=route.hash.match(/^#comment-(.+)$/)
+  if(match){try{await jumpToSource(decodeURIComponent(match[1]))}catch(_){}}
+}
+async function applyRoute(){
+  const token=++routeRequest,target=route.name,name=String(route.params.issueId||'')
+  listRequest++;error.value='';page.value=0;busy.value=false
+  if(target==='Issue'){
+    if(issue.value?.name===name){await scrollRouteComment();return}
+    issue.value=null;busy.value=true
+    try{
+      const result=createdIssue?.name===name?createdIssue:await api('get_issue',{name})
+      if(token!==routeRequest || route.name!=='Issue' || route.params.issueId!==name)return
+      createdIssue=null;issue.value=result
+      if(!notificationOpening.value)refreshNotifications()
+      await scrollRouteComment()
+    }catch(e){if(token===routeRequest)error.value=e.message}
+    finally{if(token===routeRequest)busy.value=false}
+    return
+  }
+  issue.value=null
+  if(route.meta.view){await load();return}
+  if(target==='Dashboard'){today.value=new Date();refreshTodaySchedule();refreshReceivables();refreshMonthlyMetrics();refreshRepresentativeReport()}
+}
+watch(routeScope,()=>{if(routesReady)routeLoad=applyRoute()},{flush:'sync'})
+watch(()=>route.hash,()=>{if(routesReady)scrollRouteComment()},{flush:'post'})
+async function open(name){
+  await router.push({name:'Issue',params:{issueId:name}})
+  await routeLoad
+  return issue.value?.name===name
+}
+function goDashboard(){return router.push({name:'Dashboard'})}
+function goList(v){return router.push({name:v==='overdue'?'OverdueIssues':v==='all'?'AllIssues':'Issues'})}
 function resetForm(){Object.assign(form,blank())}
-async function create(){if(!await canLeaveInline())return;await run(async()=>{const doc=await api('create_issue',form,true);showNew.value=false;resetForm();showDashboard.value=false;issue.value=doc;history.pushState({},'','/unicom/'+encodeURIComponent(doc.name))})}
+async function create(){
+  if(!await canLeaveInline())return
+  if(inlineField.value)cancelInline()
+  await run(async()=>{const doc=await api('create_issue',form,true);showNew.value=false;resetForm();createdIssue=doc;await open(doc.name)})
+}
 function editDescription(event){if(event.target.closest('a'))return;if(event.type==='keydown')event.preventDefault();startInline('description')}
 async function startInline(field){if(!canEdit.value)return false;
   if(inlineField.value===field)return
@@ -606,8 +667,8 @@ function descriptionChange(value){
 function changes(event){try{const data=JSON.parse(event.changes||'{}');return Object.entries(data).map(([key,value])=>key==='description'?{label:fieldLabel(key),text:descriptionChange(value),raw:null}:{label:fieldLabel(key),text:changeValue(value?.from,key)+' → '+changeValue(value?.to,key),raw:JSON.stringify(value)})}catch{return event.changes ? [{label:'Changes',text:event.changes,raw:event.changes}] : []}}
 
 
-onBeforeUnmount(()=>{stopSummaryPolling();clearInterval(notificationTimer);window.removeEventListener('focus',notificationFocus);document.removeEventListener('visibilitychange',notificationFocus);detailObserver?.disconnect();window.removeEventListener('resize',updateDetailViewport);for(const controller of pasteControllers.values())controller.abort();pasteControllers.clear();pendingImageTargets.clear();for(const key of Object.keys(pendingImages))delete pendingImages[key];document.removeEventListener('pointerdown',inlineInteraction,true);document.removeEventListener('focusin',inlineInteraction,true);document.removeEventListener('focusout',onInlineFocusOut,true)})
-onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notificationFocus);document.addEventListener('visibilitychange',notificationFocus);notificationTimer=setInterval(()=>{if(!document.hidden){today.value=new Date();if(!notificationsOpen.value)refreshNotifications();refreshTodaySchedule()}},30000);try{const saved=Number(localStorage.getItem(detailStorageKey));if(Number.isFinite(saved) && saved>=detailMin && saved<=detailMax)detailPreferred.value=saved}catch(_){}window.addEventListener('resize',updateDetailViewport);document.addEventListener('pointerdown',inlineInteraction,true);document.addEventListener('focusin',inlineInteraction,true);document.addEventListener('focusout',onInlineFocusOut,true);fetch('/api/method/frappe.auth.get_logged_user',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(r=>{currentUser.value=r?.message||''}).catch(()=>{});await run(async()=>{people.value=await api('users');await applyLocation()});window.onpopstate=async()=>{if(!await canLeaveInline()){history.pushState({},'',currentRoute());return}await applyLocation()};window.addEventListener('beforeunload',event=>{if(inlineField.value && inlineValue.value!==(issue.value?.[inlineField.value]||'')){event.preventDefault();event.returnValue=''}})})
+onBeforeUnmount(()=>{removeRouteGuard();routeRequest++;listRequest++;stopSummaryPolling();clearInterval(notificationTimer);window.removeEventListener('focus',notificationFocus);document.removeEventListener('visibilitychange',notificationFocus);detailObserver?.disconnect();window.removeEventListener('resize',updateDetailViewport);for(const controller of pasteControllers.values())controller.abort();pasteControllers.clear();pendingImageTargets.clear();for(const key of Object.keys(pendingImages))delete pendingImages[key];document.removeEventListener('pointerdown',inlineInteraction,true);document.removeEventListener('focusin',inlineInteraction,true);document.removeEventListener('focusout',onInlineFocusOut,true)})
+onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notificationFocus);document.addEventListener('visibilitychange',notificationFocus);notificationTimer=setInterval(()=>{if(!document.hidden){today.value=new Date();if(!notificationsOpen.value)refreshNotifications();refreshTodaySchedule()}},30000);try{const saved=Number(localStorage.getItem(detailStorageKey));if(Number.isFinite(saved) && saved>=detailMin && saved<=detailMax)detailPreferred.value=saved}catch(_){}window.addEventListener('resize',updateDetailViewport);document.addEventListener('pointerdown',inlineInteraction,true);document.addEventListener('focusin',inlineInteraction,true);document.addEventListener('focusout',onInlineFocusOut,true);fetch('/api/method/frappe.auth.get_logged_user',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(r=>{currentUser.value=r?.message||''}).catch(()=>{});await run(async()=>{people.value=await api('users')});routesReady=true;routeLoad=applyRoute();await routeLoad;window.addEventListener('beforeunload',event=>{if(inlineField.value && inlineValue.value!==(issue.value?.[inlineField.value]||'')){event.preventDefault();event.returnValue=''}})})
 </script>
 <template>
 <div class="h-screen overflow-hidden flex flex-col md:flex-row">
@@ -622,8 +683,8 @@ onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notif
       </Dropdown>
     </div>
     <nav aria-label="UniCom navigation" class="px-2 pb-2 flex flex-row md:flex-col gap-1 overflow-x-auto md:overflow-x-hidden">
-      <Button variant="ghost" icon-left="layout" class="!justify-start !h-7 !rounded !text-base !font-[420] !text-gray-700 [&>svg]:text-gray-800 shrink-0 md:w-full" :class="[sidebarCollapsed?'md:!justify-center':'',showDashboard && !issue?'!bg-white !text-gray-900 shadow-sm ring-1 ring-gray-200':'']" aria-label="Dashboard" :aria-current="showDashboard && !issue?'page':undefined" title="Dashboard" @click="goDashboard"><span :class="sidebarCollapsed?'md:sr-only':''">Dashboard</span></Button>
-      <Button v-for="item in [{view:'mine',label:'My Issues',icon:'user'}]" :key="item.view" :variant="'ghost'" :icon-left="item.icon" class="!justify-start !h-7 !rounded !text-base !font-[420] !text-gray-700 [&>svg]:text-gray-800 shrink-0 md:w-full" :class="[sidebarCollapsed?'md:!justify-center':'',!showDashboard && view===item.view?'!bg-white !text-gray-900 shadow-sm ring-1 ring-gray-200':'']" :aria-label="item.label" :aria-current="!showDashboard && view===item.view?'page':undefined" :title="item.label" @click="goList(item.view)"><span :class="sidebarCollapsed?'md:sr-only':''">{{item.label}}</span></Button>
+      <RouterLink :to="{name:'Dashboard'}" class="flex h-7 items-center gap-2 rounded px-2 text-base font-[420] text-gray-700 hover:bg-gray-100 shrink-0 md:w-full" :class="[sidebarCollapsed?'md:justify-center':'',route.name==='Dashboard'||route.name==='Representative'?'bg-white text-gray-900 shadow-sm ring-1 ring-gray-200':'']" :aria-current="route.name==='Dashboard'?'page':undefined" title="Dashboard"><FeatherIcon name="layout" class="h-4 w-4 shrink-0"/><span :class="sidebarCollapsed?'md:sr-only':''">Dashboard</span></RouterLink>
+      <RouterLink :to="{name:'Issues'}" class="flex h-7 items-center gap-2 rounded px-2 text-base font-[420] text-gray-700 hover:bg-gray-100 shrink-0 md:w-full" :class="[sidebarCollapsed?'md:justify-center':'',route.name==='Issues'||route.name==='Issue'?'bg-white text-gray-900 shadow-sm ring-1 ring-gray-200':'']" :aria-current="route.name==='Issues'?'page':undefined" title="My Issues"><FeatherIcon name="user" class="h-4 w-4 shrink-0"/><span :class="sidebarCollapsed?'md:sr-only':''">My Issues</span></RouterLink>
     </nav>
     <div class="hidden md:flex mt-auto p-2 flex-col gap-1">
       <Button variant="ghost" icon-left="help-circle" class="w-full !justify-start !h-7 !rounded !text-base !font-[420] !text-gray-700 [&>svg]:text-gray-800" :class="sidebarCollapsed?'!justify-center':''" aria-label="Frappe help" title="Frappe help" @click="openHelp"><span :class="sidebarCollapsed?'sr-only':''">Help</span></Button>
@@ -631,37 +692,15 @@ onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notif
     </div>
   </aside>
   <main class="min-w-0 min-h-0 flex-1 flex flex-col">
-    <header class="border-b border-gray-200 h-12 shrink-0 px-4 sm:px-6 flex items-center justify-between gap-2"><div class="min-w-0 flex-1 overflow-hidden"><Breadcrumbs class="unicom-breadcrumbs" :items="issue ? [{label:'Issues',onClick:()=>goList(view)},{label:'List',kind:'list',onClick:()=>goList(view)},{label:issue.title}] : showDashboard ? [{label:'Dashboard',onClick:goDashboard}] : [{label:'Issues',onClick:()=>goList(view)},{label:'List',kind:'list',onClick:()=>goList(view)}]"><template #prefix="{item}"><FeatherIcon v-if="item.kind==='list'" name="menu" class="h-4 w-4 mr-1 text-gray-600"/></template></Breadcrumbs></div><div class="flex shrink-0 items-center gap-2"><Popover v-model:show="notificationsOpen" placement="bottom-end"><template #target="{togglePopover}"><Button variant="ghost" icon="bell" class="relative" :label="'Notifications'+(notificationCount ? ' ('+notificationCount+' unread)' : '')" title="Notifications" @click="toggleNotifications(togglePopover)"><template #suffix><span v-if="notificationCount" class="absolute -right-1 -top-1 rounded-full bg-red-600 px-1.5 text-xs leading-4 text-white">{{notificationCount>99?'99+':notificationCount}}</span></template></Button></template><template #body><div role="region" aria-label="UniCom notifications" class="mt-1 w-96 max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 bg-white p-2 shadow-lg"><div class="flex items-center justify-between px-2 py-1"><span class="font-semibold">Notifications</span><Button size="sm" variant="ghost" icon="refresh-cw" label="Refresh notifications" :disabled="notificationLoading" @click="refreshNotifications()"/></div><p v-if="notificationError" role="alert" class="px-2 py-2 text-sm text-red-600">{{notificationError}} <Button size="sm" variant="ghost" :disabled="notificationLoading" @click="refreshNotifications()">Retry</Button></p><div class="max-h-96 overflow-y-auto"><button v-for="row in notificationRows" :key="row.name" type="button" class="block w-full rounded-md px-3 py-2 text-left hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500" :class="row.read?'text-gray-600':'bg-gray-50 text-gray-900'" :disabled="notificationOpening || notificationLoading || busy || hasPendingImages" @click="openNotification(row)"><span class="flex gap-2"><span v-if="!row.read" class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-blue-500" aria-label="Unread"/><span class="min-w-0"><span class="block text-sm" :class="row.read?'':'font-medium'">{{row.subject}}</span><span class="mt-1 block text-xs text-gray-500">{{formatSiteTime(row.creation)}}</span></span></span></button><p v-if="!notificationRows.length && !notificationLoading && !notificationError" class="px-3 py-6 text-center text-sm text-gray-500">No notifications yet.</p><p v-if="notificationLoading" role="status" class="px-3 py-3 text-center text-sm text-gray-500">Loading notifications…</p><Button v-if="notificationHasMore" variant="ghost" class="mt-1 w-full" :disabled="notificationLoading" @click="refreshNotifications(false)">Load more</Button></div></div></template></Popover><Popover v-if="issue && canEdit" v-model:show="assignOpen" placement="bottom-end"><template #target="{togglePopover}"><Button :variant="assignDraft.length>1 ? 'ghost' : 'subtle'" :class="assignDraft.length>1 ? '!bg-transparent' : ''" :disabled="busy &amp;&amp; !inlineSaving &amp;&amp; !assignSaving" :title="assignError ? 'Assign To: unsaved changes' : 'Assign To'" @click="openAssignments(togglePopover)"><span v-if="!assignDraft.length" class="flex items-center gap-1"><FeatherIcon name="user-plus" class="h-4 w-4"/><span class="hidden sm:inline">Assign To</span></span><span v-else-if="assignDraft.length===1" class="flex items-center gap-2"><Avatar :key="assignDraft[0]+userImage(assignDraft[0])" size="sm" :label="authorName(assignDraft[0])" :image="userImage(assignDraft[0])"/><span class="hidden max-w-32 truncate sm:inline">{{authorName(assignDraft[0])}}</span></span><span v-else class="flex items-center"><span class="flex -space-x-1"><span v-for="user in assignDraft.slice(0,3)" :key="user" role="img" :aria-label="authorName(user)" :title="authorName(user)"><Avatar :key="user+userImage(user)" size="md" class="rounded-full bg-gray-100 ring-2 ring-white" :label="authorName(user)" :image="userImage(user)"/></span></span><span v-if="assignDraft.length>3" class="ml-1 text-xs">+{{assignDraft.length-3}}</span></span><span v-if="assignError" class="ml-1 text-red-600" aria-label="Unsaved assignment changes">!</span></Button></template><template #body><div class="mt-1 w-[470px] max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 bg-white p-3 shadow-lg"><div class="mb-2 text-base text-gray-600">Assign To</div><div class="w-full"><Popover v-model:show="assignSearchOpen" class="w-full" placement="bottom-start"><template #target="{togglePopover}"><div role="button" tabindex="0" aria-label="Choose participants" class="flex min-h-14 w-full flex-wrap items-start gap-1 rounded-lg bg-gray-100 p-2" @click="togglePopover()" @keydown.enter.self.prevent="togglePopover()" @keydown.space.self.prevent="togglePopover()"><span v-for="user in assignDraft" :key="user" class="inline-flex max-w-full items-center gap-1 rounded-full border border-gray-200 bg-white px-1 py-0.5"><Avatar :key="user+userImage(user)" size="xs" :label="authorName(user)" :image="userImage(user)"/><span class="max-w-36 truncate text-base text-gray-700">{{authorName(user)}}<span v-if="user!==currentUser &amp;&amp; !people.some(person=>person.name===user)"> (unavailable)</span></span><Button size="sm" variant="ghost" icon="x" :label="'Remove '+authorName(user)" :title="'Remove '+authorName(user)" @click.stop="toggleAssignment(user)"/></span><span v-if="!assignDraft.length" class="text-base text-gray-500">Choose people</span></div></template><template #body><div class="mt-1 w-56 max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 bg-white p-2 shadow-lg"><FormControl v-model="assignQuery" placeholder="Search" aria-label="Search users"/><div class="mt-2 max-h-52 overflow-y-auto"><Button v-for="option in filteredAssignmentOptions" :key="option.value" variant="ghost" class="w-full !justify-start" :aria-pressed="assignDraft.includes(option.value)" @click="toggleAssignment(option.value)"><template #prefix><Avatar :key="option.value+userImage(option.value)" size="sm" :label="authorName(option.value)" :image="userImage(option.value)"/></template><span class="truncate" :title="option.label">{{authorName(option.value)}}<span v-if="option.value!==currentUser &amp;&amp; !people.some(person=>person.name===option.value)"> (unavailable)</span></span><template #suffix><FeatherIcon v-if="assignDraft.includes(option.value)" name="check" class="h-4 w-4"/></template></Button><div v-if="!filteredAssignmentOptions.length" class="p-2 text-sm text-gray-500">No users found</div></div><Button variant="ghost" icon-left="x" class="mt-2 w-full !justify-start border-t" @click="setAssignment([])">Clear</Button></div></template></Popover></div><div class="mt-2"><Switch class="[&amp;>span>span]:!font-normal [&amp;>span>span]:!text-gray-500" label="Assign To Me" :model-value="assignDraft.includes(currentUser)" :disabled="!currentUser || currentUser==='Guest'" @update:model-value="toggleAssignMe"/></div><p v-if="assignDraft.some(user=>user!==currentUser &amp;&amp; !people.some(person=>person.name===user))" class="mt-2 text-xs text-gray-600">If an unavailable participant prevents saving, remove them.</p><div v-if="assignSaving" role="status" class="mt-2 text-xs text-gray-500">Saving assignments…</div><div v-if="assignError" class="mt-2"><ErrorMessage :message="safeAssignError"/><Button size="sm" class="mt-1" @click="saveAssignments">Retry</Button></div></div></template></Popover><Dropdown v-if="issue" :options="statuses.map(status=>({label:status,onClick:()=>changeStatus(status)}))"><Button :disabled="!canEdit || (busy &amp;&amp; !inlineSaving)" class="whitespace-nowrap" :title="'Status: '+issue.status"><template #prefix><span :class="statusColor(issue.status)" class="h-2 w-2 rounded-full" aria-hidden="true"/></template>{{issue.status}}<span v-if="issue.overdue" class="ml-1 text-red-600">· Overdue</span><template #suffix><FeatherIcon name="chevron-down" class="h-4 w-4"/></template></Button></Dropdown><Button variant="solid" icon-left="plus" class="shrink-0 whitespace-nowrap" @click="showNew=true">Create</Button></div></header>
+    <header class="border-b border-gray-200 h-12 shrink-0 px-4 sm:px-6 flex items-center justify-between gap-2"><div class="min-w-0 flex-1 overflow-hidden"><Breadcrumbs class="unicom-breadcrumbs" :items="representativeName ? [{label:'Dashboard',onClick:goDashboard},{label:'Product representative'}] : issue ? [{label:'Issues',onClick:()=>goList(view)},{label:'List',kind:'list',onClick:()=>goList(view)},{label:issue.title}] : showDashboard ? [{label:'Dashboard',onClick:goDashboard}] : [{label:'Issues',onClick:()=>goList(view)},{label:'List',kind:'list',onClick:()=>goList(view)}]"><template #prefix="{item}"><FeatherIcon v-if="item.kind==='list'" name="menu" class="h-4 w-4 mr-1 text-gray-600"/></template></Breadcrumbs></div><div class="flex shrink-0 items-center gap-2"><Popover v-model:show="notificationsOpen" placement="bottom-end"><template #target="{togglePopover}"><Button variant="ghost" icon="bell" class="relative" :label="'Notifications'+(notificationCount ? ' ('+notificationCount+' unread)' : '')" title="Notifications" @click="toggleNotifications(togglePopover)"><template #suffix><span v-if="notificationCount" class="absolute -right-1 -top-1 rounded-full bg-red-600 px-1.5 text-xs leading-4 text-white">{{notificationCount>99?'99+':notificationCount}}</span></template></Button></template><template #body><div role="region" aria-label="UniCom notifications" class="mt-1 w-96 max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 bg-white p-2 shadow-lg"><div class="flex items-center justify-between px-2 py-1"><span class="font-semibold">Notifications</span><Button size="sm" variant="ghost" icon="refresh-cw" label="Refresh notifications" :disabled="notificationLoading" @click="refreshNotifications()"/></div><p v-if="notificationError" role="alert" class="px-2 py-2 text-sm text-red-600">{{notificationError}} <Button size="sm" variant="ghost" :disabled="notificationLoading" @click="refreshNotifications()">Retry</Button></p><div class="max-h-96 overflow-y-auto"><button v-for="row in notificationRows" :key="row.name" type="button" class="block w-full rounded-md px-3 py-2 text-left hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500" :class="row.read?'text-gray-600':'bg-gray-50 text-gray-900'" :disabled="notificationOpening || notificationLoading || busy || hasPendingImages" @click="openNotification(row)"><span class="flex gap-2"><span v-if="!row.read" class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-blue-500" aria-label="Unread"/><span class="min-w-0"><span class="block text-sm" :class="row.read?'':'font-medium'">{{row.subject}}</span><span class="mt-1 block text-xs text-gray-500">{{formatSiteTime(row.creation)}}</span></span></span></button><p v-if="!notificationRows.length && !notificationLoading && !notificationError" class="px-3 py-6 text-center text-sm text-gray-500">No notifications yet.</p><p v-if="notificationLoading" role="status" class="px-3 py-3 text-center text-sm text-gray-500">Loading notifications…</p><Button v-if="notificationHasMore" variant="ghost" class="mt-1 w-full" :disabled="notificationLoading" @click="refreshNotifications(false)">Load more</Button></div></div></template></Popover><Popover v-if="issue && canEdit" v-model:show="assignOpen" placement="bottom-end"><template #target="{togglePopover}"><Button :variant="assignDraft.length>1 ? 'ghost' : 'subtle'" :class="assignDraft.length>1 ? '!bg-transparent' : ''" :disabled="busy &amp;&amp; !inlineSaving &amp;&amp; !assignSaving" :title="assignError ? 'Assign To: unsaved changes' : 'Assign To'" @click="openAssignments(togglePopover)"><span v-if="!assignDraft.length" class="flex items-center gap-1"><FeatherIcon name="user-plus" class="h-4 w-4"/><span class="hidden sm:inline">Assign To</span></span><span v-else-if="assignDraft.length===1" class="flex items-center gap-2"><Avatar :key="assignDraft[0]+userImage(assignDraft[0])" size="sm" :label="authorName(assignDraft[0])" :image="userImage(assignDraft[0])"/><span class="hidden max-w-32 truncate sm:inline">{{authorName(assignDraft[0])}}</span></span><span v-else class="flex items-center"><span class="flex -space-x-1"><span v-for="user in assignDraft.slice(0,3)" :key="user" role="img" :aria-label="authorName(user)" :title="authorName(user)"><Avatar :key="user+userImage(user)" size="md" class="rounded-full bg-gray-100 ring-2 ring-white" :label="authorName(user)" :image="userImage(user)"/></span></span><span v-if="assignDraft.length>3" class="ml-1 text-xs">+{{assignDraft.length-3}}</span></span><span v-if="assignError" class="ml-1 text-red-600" aria-label="Unsaved assignment changes">!</span></Button></template><template #body><div class="mt-1 w-[470px] max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 bg-white p-3 shadow-lg"><div class="mb-2 text-base text-gray-600">Assign To</div><div class="w-full"><Popover v-model:show="assignSearchOpen" class="w-full" placement="bottom-start"><template #target="{togglePopover}"><div role="button" tabindex="0" aria-label="Choose participants" class="flex min-h-14 w-full flex-wrap items-start gap-1 rounded-lg bg-gray-100 p-2" @click="togglePopover()" @keydown.enter.self.prevent="togglePopover()" @keydown.space.self.prevent="togglePopover()"><span v-for="user in assignDraft" :key="user" class="inline-flex max-w-full items-center gap-1 rounded-full border border-gray-200 bg-white px-1 py-0.5"><Avatar :key="user+userImage(user)" size="xs" :label="authorName(user)" :image="userImage(user)"/><span class="max-w-36 truncate text-base text-gray-700">{{authorName(user)}}<span v-if="user!==currentUser &amp;&amp; !people.some(person=>person.name===user)"> (unavailable)</span></span><Button size="sm" variant="ghost" icon="x" :label="'Remove '+authorName(user)" :title="'Remove '+authorName(user)" @click.stop="toggleAssignment(user)"/></span><span v-if="!assignDraft.length" class="text-base text-gray-500">Choose people</span></div></template><template #body><div class="mt-1 w-56 max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 bg-white p-2 shadow-lg"><FormControl v-model="assignQuery" placeholder="Search" aria-label="Search users"/><div class="mt-2 max-h-52 overflow-y-auto"><Button v-for="option in filteredAssignmentOptions" :key="option.value" variant="ghost" class="w-full !justify-start" :aria-pressed="assignDraft.includes(option.value)" @click="toggleAssignment(option.value)"><template #prefix><Avatar :key="option.value+userImage(option.value)" size="sm" :label="authorName(option.value)" :image="userImage(option.value)"/></template><span class="truncate" :title="option.label">{{authorName(option.value)}}<span v-if="option.value!==currentUser &amp;&amp; !people.some(person=>person.name===option.value)"> (unavailable)</span></span><template #suffix><FeatherIcon v-if="assignDraft.includes(option.value)" name="check" class="h-4 w-4"/></template></Button><div v-if="!filteredAssignmentOptions.length" class="p-2 text-sm text-gray-500">No users found</div></div><Button variant="ghost" icon-left="x" class="mt-2 w-full !justify-start border-t" @click="setAssignment([])">Clear</Button></div></template></Popover></div><div class="mt-2"><Switch class="[&amp;>span>span]:!font-normal [&amp;>span>span]:!text-gray-500" label="Assign To Me" :model-value="assignDraft.includes(currentUser)" :disabled="!currentUser || currentUser==='Guest'" @update:model-value="toggleAssignMe"/></div><p v-if="assignDraft.some(user=>user!==currentUser &amp;&amp; !people.some(person=>person.name===user))" class="mt-2 text-xs text-gray-600">If an unavailable participant prevents saving, remove them.</p><div v-if="assignSaving" role="status" class="mt-2 text-xs text-gray-500">Saving assignments…</div><div v-if="assignError" class="mt-2"><ErrorMessage :message="safeAssignError"/><Button size="sm" class="mt-1" @click="saveAssignments">Retry</Button></div></div></template></Popover><Dropdown v-if="issue" :options="statuses.map(status=>({label:status,onClick:()=>changeStatus(status)}))"><Button :disabled="!canEdit || (busy &amp;&amp; !inlineSaving)" class="whitespace-nowrap" :title="'Status: '+issue.status"><template #prefix><span :class="statusColor(issue.status)" class="h-2 w-2 rounded-full" aria-hidden="true"/></template>{{issue.status}}<span v-if="issue.overdue" class="ml-1 text-red-600">· Overdue</span><template #suffix><FeatherIcon name="chevron-down" class="h-4 w-4"/></template></Button></Dropdown><Button variant="solid" icon-left="plus" class="shrink-0 whitespace-nowrap" @click="showNew=true">Create</Button></div></header>
     <ErrorMessage v-if="error" class="mx-6 mt-4" :message="safeError"/>
-    <div v-if="showDashboard && !issue" class="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
+    <div v-if="route.name==='Issue' && !issue" class="flex-1 px-6 py-6 text-sm text-gray-500" role="status">{{busy?'Loading issue…':error?'Issue unavailable.':''}}</div>
+    <RepresentativeDetail v-else-if="representativeName" :key="representativeName" :name="representativeName" :api="api" :format-amount="receivableAmount" :format-date="formatSiteDate" @back="goDashboard"/>
+    <div v-else-if="showDashboard && !issue" class="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
       <div class="mx-auto max-w-5xl space-y-6">
         <div><h1 class="text-2xl font-semibold">Dashboard</h1></div>
-        <div aria-label="Invoice summary" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <section aria-labelledby="dashboard-overdue" class="rounded-lg border border-gray-200 bg-white p-5 sm:p-6">
-            <h2 id="dashboard-overdue" class="text-base font-medium">Overdue invoices</h2>
-            <p v-if="!receivables && !receivablesError" role="status" class="mt-3 text-sm text-gray-500">Loading…</p>
-            <p v-else-if="receivablesError" role="alert" class="mt-3 text-sm text-gray-600">{{receivablesError}} <Button size="sm" variant="ghost" @click="refreshReceivables">Retry</Button></p>
-            <p v-else-if="!receivables?.available" class="mt-3 text-sm text-gray-500">Unavailable with your current invoice access.</p>
-            <p v-else class="mt-3 text-2xl font-semibold tabular-nums">{{receivables.overdue_count}}</p>
-
-          </section>
-          <section aria-labelledby="dashboard-receivable" class="rounded-lg border border-gray-200 bg-white p-5 sm:p-6">
-            <h2 id="dashboard-receivable" class="text-base font-medium">Market Credit</h2>
-            <p v-if="!receivables && !receivablesError" role="status" class="mt-3 text-sm text-gray-500">Loading…</p>
-            <p v-else-if="receivablesError" class="mt-3 text-sm text-gray-600">{{receivablesError}}</p>
-            <p v-else-if="!receivables?.available" class="mt-3 text-sm text-gray-500">Unavailable with your current invoice access.</p>
-            <template v-else>
-              <ul v-if="receivables.receivables.length" class="mt-3 space-y-1"><li v-for="total in receivables.receivables" :key="total.currency" class="flex flex-wrap items-baseline gap-2"><span class="text-sm text-gray-600">{{total.currency}}</span><span class="text-2xl font-semibold tabular-nums">{{receivableAmount(total.amount)}}</span></li></ul>
-              <p v-else class="mt-3 text-sm text-gray-500">No receivables in the invoices you can access.</p>
-              <p v-if="receivables.omitted_currency_count" class="mt-2 text-xs text-gray-600">{{receivables.omitted_currency_count}} invoices omitted because their account currency is missing.</p>
-            </template>
-
-          </section>
-          <MonthlyMetricCard title="Sales this month" :metric="monthlyMetrics?.sales" :loading="monthlyLoading" :error="monthlyError" :format-amount="receivableAmount" @retry="refreshMonthlyMetrics"/>
-          <MonthlyMetricCard title="Expense this Month" :metric="monthlyMetrics?.expenses" :loading="monthlyLoading" :error="monthlyError" :format-amount="receivableAmount" @retry="refreshMonthlyMetrics"/>
-        </div>
-
-        <section aria-labelledby="dashboard-today" class="rounded-lg border border-gray-200 bg-white p-5 sm:p-6">
+        <div class="grid min-w-0 grid-cols-1 items-start gap-6 lg:grid-cols-2 lg:items-stretch">
+          <section aria-labelledby="dashboard-today" class="min-w-0 rounded-lg border border-gray-200 bg-white p-5 sm:p-6">
           <div class="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h2 id="dashboard-today" class="flex items-center gap-2 text-lg font-semibold"><FeatherIcon name="calendar" class="h-5 w-5 text-gray-500"/>Today</h2>
@@ -684,6 +723,32 @@ onMounted(async()=>{refreshNotifications();window.addEventListener('focus',notif
             </li>
           </ul>
         </section>
+          <div aria-label="Invoice summary" class="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
+          <section aria-labelledby="dashboard-overdue" class="rounded-lg border border-gray-200 bg-white p-5 sm:p-6">
+            <h2 id="dashboard-overdue" class="text-base font-medium">Overdue invoices</h2>
+            <p v-if="!receivables && !receivablesError" role="status" class="mt-3 text-sm text-gray-500">Loading…</p>
+            <p v-else-if="receivablesError" role="alert" class="mt-3 text-sm text-gray-600">{{receivablesError}} <Button size="sm" variant="ghost" @click="refreshReceivables">Retry</Button></p>
+            <p v-else-if="!receivables?.available" class="mt-3 text-sm text-gray-500">Unavailable with your current invoice access.</p>
+            <p v-else class="mt-3 text-2xl font-semibold tabular-nums">{{receivables.overdue_count}}</p>
+
+          </section>
+          <section aria-labelledby="dashboard-receivable" class="rounded-lg border border-gray-200 bg-white p-5 sm:p-6">
+            <h2 id="dashboard-receivable" class="text-base font-medium">Market Credit</h2>
+            <p v-if="!receivables && !receivablesError" role="status" class="mt-3 text-sm text-gray-500">Loading…</p>
+            <p v-else-if="receivablesError" class="mt-3 text-sm text-gray-600">{{receivablesError}}</p>
+            <p v-else-if="!receivables?.available" class="mt-3 text-sm text-gray-500">Unavailable with your current invoice access.</p>
+            <template v-else>
+              <ul v-if="receivables.receivables.length" class="mt-3 space-y-1"><li v-for="total in receivables.receivables" :key="total.currency" class="flex flex-wrap items-baseline gap-2"><span class="text-sm text-gray-600">{{total.currency}}</span><span class="text-2xl font-semibold tabular-nums">{{receivableAmount(total.amount)}}</span></li></ul>
+              <p v-else class="mt-3 text-sm text-gray-500">No receivables in the invoices you can access.</p>
+              <p v-if="receivables.omitted_currency_count" class="mt-2 text-xs text-gray-600">{{receivables.omitted_currency_count}} invoices omitted because their account currency is missing.</p>
+            </template>
+
+          </section>
+          <MonthlyMetricCard :title="monthLabel(monthlyMetrics?.start_date,'Sales','Sales this month')" :metric="monthlyMetrics?.sales" :loading="monthlyLoading" :error="monthlyError" :format-amount="receivableAmount" @retry="refreshMonthlyMetrics"/>
+          <MonthlyMetricCard :title="monthLabel(monthlyMetrics?.start_date,'Expense','Expense this Month')" :metric="monthlyMetrics?.expenses" :loading="monthlyLoading" :error="monthlyError" :format-amount="receivableAmount" @retry="refreshMonthlyMetrics"/>
+        </div>
+        </div>
+        <RepresentativeReport :report="representativeReport" :loading="representativeLoading" :error="representativeError" :format-amount="receivableAmount" @retry="refreshRepresentativeReport"/>
       </div>
     </div>
     <template v-else-if="!issue">

@@ -8,14 +8,15 @@
   },
   "dependencies": {
     "frappe-ui": "0.1.72",
+    "frappe-ui-charts": "npm:frappe-ui@1.2.0",
     "vue": "3.5.12",
     "vue-router": "4.4.5"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "4.6.2",
-    "vite": "5.4.20",
-    "tailwindcss": "3.4.14",
+    "autoprefixer": "10.4.2",
     "postcss": "8.5.4",
-    "autoprefixer": "10.4.2"
+    "tailwindcss": "3.4.14",
+    "vite": "5.4.20"
   }
 }
